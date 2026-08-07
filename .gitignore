@@ -1,0 +1,8 @@
+backend/.venv/
+backend/replay_sessions/*.json
+models/
+frontend/node_modules/
+frontend/dist/
+__pycache__/
+*.pyc
+.env

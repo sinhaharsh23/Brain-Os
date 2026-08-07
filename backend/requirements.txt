@@ -1,0 +1,11 @@
+torch>=2.4
+transformers>=4.44
+numpy>=1.26
+fastapi>=0.110
+uvicorn[standard]>=0.29
+websockets>=12
+scikit-learn>=1.4
+psutil>=5.9
+pydantic-settings>=2.2
+pytest>=8.0
+pytest-asyncio>=0.23
