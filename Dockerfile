@@ -18,8 +18,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 COPY backend/requirements.txt /app/backend/requirements.txt
 COPY backend/requirements-runtime.txt /app/backend/requirements-runtime.txt
-RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu "torch>=2.4" \
-    && pip install --no-cache-dir -r /app/backend/requirements-runtime.txt
+RUN pip install --no-cache-dir --retries 5 --timeout 120 --index-url https://download.pytorch.org/whl/cpu "torch>=2.4" \
+    && pip install --no-cache-dir --retries 5 --timeout 120 -r /app/backend/requirements-runtime.txt
 COPY backend/ /app/backend/
 COPY alembic.ini /app/alembic.ini
 COPY --from=frontend-build /src/frontend/dist /app/frontend/dist
