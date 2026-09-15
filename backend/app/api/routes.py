@@ -5,6 +5,7 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Path, Query, Request, status
+from fastapi.responses import PlainTextResponse
 
 from app.config import settings
 from app.events.types import Event
@@ -120,6 +121,36 @@ async def providers() -> list[dict[str, Any]]:
 @router.get("/scheduler")
 async def scheduler_status() -> dict[str, Any]:
     return state.scheduler.snapshot() if state.scheduler is not None else {"queue_size": 0, "queue_limit": 0, "active": 0, "active_limit": 0, "runs": 0}
+
+
+@router.get("/metrics", response_class=PlainTextResponse, include_in_schema=False)
+async def metrics() -> PlainTextResponse:
+    """Expose low-cardinality Prometheus metrics without prompts or tokens."""
+    snapshot = state.monitor.snapshot()
+    scheduler = state.scheduler.snapshot() if state.scheduler is not None else {}
+    model_loaded = 1 if state.model_status == "loaded" else 0
+    lines = [
+        "# HELP brainos_model_loaded Whether the configured model is loaded.",
+        "# TYPE brainos_model_loaded gauge",
+        f"brainos_model_loaded {model_loaded}",
+        "# HELP brainos_websocket_clients Current connected WebSocket clients.",
+        "# TYPE brainos_websocket_clients gauge",
+        f"brainos_websocket_clients {state.manager.count}",
+        "# HELP brainos_cpu_percent Current host CPU utilization percentage.",
+        "# TYPE brainos_cpu_percent gauge",
+        f"brainos_cpu_percent {snapshot['cpu_percent']}",
+        "# HELP brainos_process_ram_bytes Current BrainOS process resident memory.",
+        "# TYPE brainos_process_ram_bytes gauge",
+        f"brainos_process_ram_bytes {snapshot['process_ram_gb'] * 1024**3}",
+    ]
+    for metric in ("queue_size", "active", "runs"):
+        if metric in scheduler:
+            lines.extend([
+                f"# HELP brainos_scheduler_{metric} Current scheduler {metric}.",
+                f"# TYPE brainos_scheduler_{metric} gauge",
+                f"brainos_scheduler_{metric} {scheduler[metric]}",
+            ])
+    return PlainTextResponse("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
 
 
 @router.post("/workspaces", status_code=status.HTTP_201_CREATED)

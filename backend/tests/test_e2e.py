@@ -51,6 +51,15 @@ def test_hardware(client):
     assert "cuda_available" in data
 
 
+def test_metrics_endpoint_is_prometheus_compatible(client):
+    r = client.get("/api/metrics")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/plain; version=0.0.4")
+    assert "brainos_model_loaded" in r.text
+    assert "brainos_websocket_clients" in r.text
+    assert "token" not in r.text.lower()
+
+
 def test_models_listing(client):
     r = client.get("/api/models")
     assert r.status_code == 200
