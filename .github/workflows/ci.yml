@@ -16,10 +16,10 @@ jobs:
       - name: Install backend dependencies
         run: pip install -r backend/requirements.txt
       - name: Run backend tests
-        working-directory: backend
         env:
           HF_HOME: ${{ runner.temp }}/huggingface
-        run: python -m pytest tests -q
+          BRAINOS_HF_HOME: ${{ runner.temp }}/huggingface
+        run: python -m pytest backend/tests -q
 
   frontend:
     runs-on: ubuntu-latest
@@ -57,7 +57,6 @@ jobs:
         run: docker build --tag brainos:ci .
 
   browser:
-    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -80,6 +79,10 @@ jobs:
       - name: Start BrainOS
         env:
           HF_HOME: ${{ runner.temp }}/huggingface
+          BRAINOS_HF_HOME: ${{ runner.temp }}/huggingface
+          BRAINOS_DEVICE: cpu
+          BRAINOS_DATABASE_URL: sqlite:////tmp/brainos-ci.db
+          BRAINOS_REPLAY_DIR: /tmp/brainos-ci-replays
         run: nohup python backend/run.py > /tmp/brainos.log 2>&1 &
       - name: Wait for model readiness
         run: |
@@ -92,3 +95,11 @@ jobs:
       - name: Run real browser suite
         working-directory: frontend
         run: npm run test:browser
+      - name: Run auth browser suite
+        working-directory: frontend
+        env:
+          BRAINOS_PYTHON: python
+          BRAINOS_HF_OFFLINE: "0"
+          HF_HOME: ${{ runner.temp }}/huggingface
+          BRAINOS_HF_HOME: ${{ runner.temp }}/huggingface
+        run: npm run test:browser:auth

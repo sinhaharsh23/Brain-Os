@@ -3,7 +3,11 @@ import { defineConfig, devices } from "@playwright/test"
 
 const macChrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 const linuxChrome = "/usr/bin/google-chrome"
-const chromePath = fs.existsSync(macChrome) ? macChrome : fs.existsSync(linuxChrome) ? linuxChrome : undefined
+const chromePath = process.platform === "darwin" && fs.existsSync(macChrome)
+  ? macChrome
+  : process.platform === "linux" && fs.existsSync(linuxChrome)
+    ? linuxChrome
+    : undefined
 
 export default defineConfig({
   testDir: "./tests",
