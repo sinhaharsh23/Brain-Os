@@ -24,7 +24,7 @@ For multi-user mode, set `BRAINOS_AUTH_MODE=multi_user` and `BRAINOS_DATABASE_UR
 
 ## Docker Compose
 
-The supported deployment artifact is the root `Dockerfile` and `docker-compose.yml`. Docker is not available on the current Mac validation environment, so these artifacts remain `IMPLEMENTED_NOT_VERIFIED` until a Docker runtime actually builds and starts them.
+The supported deployment artifact is the root `Dockerfile` and `docker-compose.yml`. The GitHub-hosted Linux CI runtime smoke builds and starts the image, verifies health/readiness, frontend serving, WebSocket connectivity, named-volume persistence across restart, and clean shutdown. Docker runtime remains unverified on the current Mac because Docker is not installed there.
 
 1. Copy `.env.example` to `.env`.
 2. Set `BRAINOS_AUTH_TOKEN` to a strong random value.
@@ -48,7 +48,7 @@ The model cache and replay tensor bundles are stored in named volumes. The first
 
 ## Reverse Proxy
 
-The proxy must forward both HTTP and WebSocket traffic to port `8765`. If the frontend and backend share the same public origin, leave `VITE_BRAINOS_WS_URL` unset and the browser uses the current origin's `/ws` path. For a separate backend origin, set `VITE_BRAINOS_WS_URL` at frontend build time.
+The example Nginx configuration is in `deploy/nginx/brainos.conf.example`. Replace the example hostname and certificate paths, then validate it with `nginx -t`. The proxy must forward both HTTP and WebSocket traffic to port `8765`, preserve the upgrade headers, and enforce HTTPS. If the frontend and backend share the same public origin, leave `VITE_BRAINOS_WS_URL` unset and the browser uses the current origin's `/ws` path. For a separate backend origin, set `VITE_BRAINOS_WS_URL` at frontend build time. GitHub CI validates the configuration syntax and runs an ephemeral TLS/WebSocket proxy smoke test; this does not verify a public production certificate or network.
 
 ## Secrets
 
@@ -56,11 +56,11 @@ Keep `BRAINOS_AUTH_TOKEN`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and provider k
 
 ## Health, readiness, and operations
 
-Use `/api/health` for process/container liveness and `/api/ready` for model readiness. A reverse proxy/load balancer must wait for readiness before routing inference traffic. `/api/hardware` and `/api/monitoring/history` expose runtime diagnostics; a Prometheus-compatible `/metrics` endpoint is not currently implemented. Logs include application errors and session identifiers where available, but production deployments should add external log retention/redaction policy.
+Use `/api/health` for process/container liveness and `/api/ready` for model readiness. A reverse proxy/load balancer must wait for readiness before routing inference traffic. `/api/hardware`, `/api/monitoring/history`, and the low-cardinality Prometheus-compatible `/api/metrics` endpoint expose runtime diagnostics; the API middleware protects metrics in authenticated modes. Logs include application errors and session identifiers where available, but production deployments should add structured collection, retention, redaction, and alerting policy.
 
 ## CI
 
-`.github/workflows/ci.yml` runs backend tests, frontend typecheck/build, dependency audit, and Docker build validation on GitHub-hosted Linux runners. A manual browser job runs the real Playwright suite against a booted local model service; the same suite is also reproducibly runnable on the development Mac.
+`.github/workflows/ci.yml` runs backend tests, frontend typecheck/build, dependency audit, PostgreSQL migration/runtime and backup/restore smoke tests, Docker image/runtime validation, Nginx syntax/TLS proxy validation, and the real Playwright suite on GitHub-hosted Linux runners. The same browser suite is also reproducibly runnable on the development Mac.
 
 ## Hosting
 
