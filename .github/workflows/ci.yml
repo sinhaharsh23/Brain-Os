@@ -395,10 +395,20 @@ jobs:
       - name: Validate Nginx TLS configuration
         run: |
           set -euo pipefail
+          docker network create brainos-proxy-config
+          docker run --detach --name brainos-proxy-config-upstream \
+            --network brainos-proxy-config --network-alias brainos \
+            alpine:3.20 sleep 300
           docker run --rm \
+            --network brainos-proxy-config \
             --volume "$RUNNER_TEMP/brainos.conf:/etc/nginx/conf.d/default.conf:ro" \
             --volume "$RUNNER_TEMP/brainos-tls:/etc/nginx/tls:ro" \
             nginx:1.27-alpine nginx -t
+      - name: Clean up Nginx config test network
+        if: always()
+        run: |
+          docker rm --force brainos-proxy-config-upstream || true
+          docker network rm brainos-proxy-config || true
 
   websocket-proxy-runtime:
     runs-on: ubuntu-latest
