@@ -4,6 +4,7 @@ import { OrbitControls, Stars } from "@react-three/drei"
 import * as THREE from "three"
 import { useBrain } from "../store/useBrainStore"
 import { Text } from "@react-three/drei"
+import ExternalObservationNotice from "../components/ExternalObservationNotice"
 
 function PcaPoints() {
   const pca = useBrain((s) => s.pca)
@@ -144,6 +145,8 @@ function Scatter2D() {
 
 export default function EmbeddingView() {
   const pca = useBrain((s) => s.pca)
+  const inspectionMode = useBrain((s) => s.inspectionMode)
+  if (inspectionMode === "limited") return <ExternalObservationNotice />
   return (
     <div style={{ display: "flex", gap: 10, padding: 10, height: "100%", overflow: "auto" }}>
       <div style={{ flex: "1 1 0", minWidth: 0 }}>

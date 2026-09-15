@@ -1,9 +1,11 @@
 import { create } from "zustand"
 import type {
   AttentionLink,
+  AuthUser,
   Candidate,
   DevEntry,
   EmbeddingsComplete,
+  ExternalUsage,
   GenToken,
   HardwareReport,
   LayerLinks,
@@ -19,7 +21,22 @@ import type {
   TokenInfo,
 } from "../types"
 
-export type ViewMode = "brain" | "architecture" | "attention" | "embedding" | "tokenflow" | "dev"
+export type ViewMode =
+  | "neural-interface"
+  | "neuro-core"
+  | "architecture"
+  | "attention"
+  | "embedding"
+  | "tokenflow"
+  | "memory-matrix"
+  | "data-streams"
+  | "model-hub"
+  | "training-hub"
+  | "plugins"
+  | "system-monitor"
+  | "settings"
+  | "brain"
+  | "dev"
 
 export interface LayerState {
   norm: number
@@ -41,10 +58,15 @@ export interface InspectorData {
 export interface BrainState {
   connected: boolean
   modelStatus: string
+  provider: string | null
+  inspectionMode: "deep" | "limited" | null
+  providerModel: string | null
+  usage: ExternalUsage | null
   model: ModelMetadata | null
   hardware: HardwareReport | null
   sessionId: string | null
   running: boolean
+  paused: boolean
   currentStep: number
   prompt: string
   tokens: TokenInfo[]
@@ -66,20 +88,25 @@ export interface BrainState {
   selectedToken: number | null
   selectedLayer: number | null
   selectedHead: number | null
+  selectedNeuron: { layer: number; index: number } | null
   view: ViewMode
   summary: Summary | null
   inferenceError: string | null
+  user: AuthUser | null
+  authMode: "local" | "multi_user"
+  authRequired: boolean
+  runId: string | null
+  requestId: string | null
+  runStatus: string
+  queuePosition: number | null
+  queueLimit: number | null
 
   dispatch: (ev: { type: string; data: Record<string, unknown>; ts: number; session_id: string | null }) => void
   set: (patch: Partial<BrainState>) => void
-  run: (prompt: string, params: Record<string, unknown>) => void
-  cancel: () => void
-  replaySession: (sessionId: string, speed: number) => void
-  replayPause: (paused: boolean) => void
-  replayStop: () => void
   selectToken: (pos: number | null) => void
   selectLayer: (layer: number | null) => void
   selectHead: (head: number | null) => void
+  selectNeuron: (layer: number, index: number) => void
   setInspector: (data: InspectorData | null) => void
   setView: (v: ViewMode) => void
 }
@@ -89,7 +116,8 @@ function tokenLabel(text: string): string {
 }
 
 function pushLog(entries: DevEntry[], message: string, level = "info", ts = Date.now()): DevEntry[] {
-  return [...entries.slice(-499), { level, message, ts }]
+  const browserTs = ts < 100000000000 ? ts * 1000 : ts
+  return [...entries.slice(-499), { level, message, ts: browserTs }]
 }
 
 function pushTimeline(entries: TimelineEntry[], e: TimelineEntry): TimelineEntry[] {
@@ -99,10 +127,15 @@ function pushTimeline(entries: TimelineEntry[], e: TimelineEntry): TimelineEntry
 export const useBrain = create<BrainState>((set, get) => ({
   connected: false,
   modelStatus: "not_loaded",
+  provider: null,
+  inspectionMode: null,
+  providerModel: null,
+  usage: null,
   model: null,
   hardware: null,
   sessionId: null,
   running: false,
+  paused: false,
   currentStep: 0,
   prompt: "",
   tokens: [],
@@ -124,9 +157,18 @@ export const useBrain = create<BrainState>((set, get) => ({
   selectedToken: null,
   selectedLayer: null,
   selectedHead: null,
-  view: "brain",
+  selectedNeuron: null,
+  view: "neuro-core",
   summary: null,
   inferenceError: null,
+  user: null,
+  authMode: "local",
+  authRequired: false,
+  runId: null,
+  requestId: null,
+  runStatus: "IDLE",
+  queuePosition: null,
+  queueLimit: null,
 
   set: (patch) => set(patch),
 
@@ -142,7 +184,75 @@ export const useBrain = create<BrainState>((set, get) => ({
         set({
           devLog: pushLog(st.devLog, `ERROR: ${String(data.message)}`, "error"),
           inferenceError: String(data.message),
+          modelStatus: data.stage === "model_load" ? "error" : st.modelStatus,
+          running: data.stage === "external_provider" ? false : st.running,
+          paused: data.stage === "external_provider" ? false : st.paused,
+          runStatus: data.code === "queue_full" ? "QUEUE_FULL" : st.runStatus,
         })
+        break
+      case "inference.queued":
+        set({
+          running: true,
+          runId: String(data.run_id ?? st.runId ?? ""),
+          requestId: String(data.request_id ?? st.requestId ?? ""),
+          sessionId: String(data.session_id ?? ev.session_id ?? ""),
+          runStatus: "QUEUED",
+          queuePosition: Number(data.queue_position ?? 0),
+          queueLimit: Number(data.queue_limit ?? 0),
+          devLog: pushLog(st.devLog, `run queued at position ${String(data.queue_position ?? "?")}`),
+        })
+        break
+      case "inference.timeout":
+        set({ running: false, paused: false, runStatus: "TIMED_OUT", inferenceError: `inference timed out after ${String(data.timeout_s)}s` })
+        break
+      case "inference.failed":
+        set({ running: false, paused: false, runStatus: "FAILED", inferenceError: String(data.message ?? "inference failed"), devLog: pushLog(st.devLog, `inference failed: ${String(data.message ?? "unknown error")}`, "error") })
+        break
+      case "external.started":
+        set({
+          running: true,
+          paused: false,
+          inferenceError: null,
+          provider: String(data.provider ?? "external"),
+          inspectionMode: "limited",
+          providerModel: String(data.model ?? ""),
+          usage: null,
+          sessionId: (ev.session_id as string) ?? null,
+          prompt: String(data.prompt ?? ""),
+          tokens: [],
+          generatedTokens: [],
+          response: "",
+          layers: {},
+          attentionLinks: {},
+          qkvStats: [],
+          mlpTop: {},
+          candidates: null,
+          lastLogits: null,
+          pca: null,
+          summary: null,
+          selectedToken: null,
+          selectedLayer: null,
+          selectedHead: null,
+          selectedNeuron: null,
+          runStatus: "RUNNING",
+          timeline: pushTimeline(st.timeline, { type: "external", label: `${String(data.provider)} external observation started`, ts }),
+          devLog: pushLog(st.devLog, `${String(data.provider)} external mode: internal tensors unavailable`),
+        })
+        break
+      case "inference.paused":
+        set({ paused: true, devLog: pushLog(st.devLog, `inference paused after step ${String(data.step)}`), timeline: pushTimeline(st.timeline, { type: "pause", label: `paused after step ${String(data.step)}`, step: data.step as number, ts }) })
+        break
+      case "inference.resumed":
+        set({ paused: false, devLog: pushLog(st.devLog, `inference resumed at step ${String(data.step)}`), timeline: pushTimeline(st.timeline, { type: "resume", label: `resumed at step ${String(data.step)}`, step: data.step as number, ts }) })
+        break
+      case "external.chunk":
+        set({
+          response: `${st.response}${String(data.text ?? "")}`,
+          timeline: pushTimeline(st.timeline, { type: "external", label: `external response chunk`, ts }),
+        })
+        break
+      case "external.usage":
+        set({ usage: data.usage as ExternalUsage })
         break
       case "model.ready":
         set({ model: data.metadata as ModelMetadata, modelStatus: "loaded" })
@@ -154,7 +264,15 @@ export const useBrain = create<BrainState>((set, get) => ({
         set({
           running: true,
           inferenceError: null,
+          provider: "qwen-local",
+          inspectionMode: "deep",
+          providerModel: null,
+          usage: null,
           sessionId: (ev.session_id as string) ?? null,
+          runId: typeof data.run_id === "string" ? data.run_id : st.runId,
+          requestId: typeof data.request_id === "string" ? data.request_id : st.requestId,
+          runStatus: data.phase === "scheduler" ? "STARTING" : "RUNNING",
+          queuePosition: null,
           prompt: String(data.prompt ?? ""),
           tokens: [],
           generatedTokens: [],
@@ -249,6 +367,7 @@ export const useBrain = create<BrainState>((set, get) => ({
           text: string
           probability: number
           rank: number | null
+          position?: number
           output: string
           time_ms: number
           embedding: { norm: number; pca3: [number, number, number] }
@@ -259,7 +378,7 @@ export const useBrain = create<BrainState>((set, get) => ({
           text: tokenLabel(d.text),
           probability: d.probability,
           rank: d.rank,
-          position: st.tokens.length + (d.step - 1),
+          position: typeof d.position === "number" ? d.position : st.tokens.length + d.step,
           time_ms: d.time_ms,
           pca3: d.embedding?.pca3 ?? null,
         }
@@ -281,9 +400,24 @@ export const useBrain = create<BrainState>((set, get) => ({
       case "inference.complete":
         set({
           running: false,
+          paused: false,
+          runStatus: "COMPLETED",
+          queuePosition: null,
           summary: data.summary as Summary,
+          usage: (data.usage as ExternalUsage | null | undefined) ?? ((data.summary as Summary | undefined)?.usage ?? null),
           devLog: pushLog(st.devLog, `inference complete: ${String(data.num_output_tokens)} tokens, ${JSON.stringify((data.timings as Record<string, number>).tokens_per_second ?? 0)} tok/s`),
           timeline: pushTimeline(st.timeline, { type: "complete", label: "inference complete", ts }),
+        })
+        break
+      case "inference.cancelled":
+        set({
+          running: false,
+          paused: false,
+          runStatus: String(data.status ?? "CANCELLED"),
+          queuePosition: null,
+          summary: data.summary as Summary,
+          devLog: pushLog(st.devLog, `inference cancelled after ${String(data.num_output_tokens)} tokens`, "warn"),
+          timeline: pushTimeline(st.timeline, { type: "cancelled", label: "inference cancelled", ts }),
         })
         break
       case "replay.loaded":
@@ -301,16 +435,10 @@ export const useBrain = create<BrainState>((set, get) => ({
     }
   },
 
-  run: (_prompt, _params) => {
-    set({ running: true, inferenceError: null })
-  },
-  cancel: () => {},
-  replaySession: () => {},
-  replayPause: () => {},
-  replayStop: () => {},
   selectToken: (pos) => set({ selectedToken: pos }),
   selectLayer: (layer) => set({ selectedLayer: layer }),
   selectHead: (head) => set({ selectedHead: head }),
+  selectNeuron: (layer, index) => set({ selectedNeuron: { layer, index }, selectedLayer: layer }),
   setInspector: (data) => set({ inspector: data }),
   setView: (v) => set({ view: v }),
 }))

@@ -25,3 +25,12 @@ def test_monitor_history(adapter):
     monitor.snapshot()
     monitor.snapshot()
     assert len(monitor.history()) == 2
+
+
+def test_gpu_utilization_is_unknown_without_monitoring(monkeypatch):
+    import sys
+
+    monkeypatch.setitem(sys.modules, "pynvml", None)
+    from app.monitoring.monitor import _gpu_utilization
+
+    assert _gpu_utilization() is None

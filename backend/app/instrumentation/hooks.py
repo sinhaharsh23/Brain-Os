@@ -15,17 +15,25 @@ class HookManager:
         self._handles.append(module.register_forward_hook(fn))
 
     def register_layer_hooks(self, layer, layer_index: int, on_qkv, on_mlp, on_layer_out) -> None:
-        attn = layer.self_attn
-        mlp = layer.mlp
+        attn = getattr(layer, "self_attn", None)
+        mlp = getattr(layer, "mlp", None)
 
-        self.register(attn.q_proj, _make_proj_hook("q", layer_index, on_qkv))
-        self.register(attn.k_proj, _make_proj_hook("k", layer_index, on_qkv))
-        self.register(attn.v_proj, _make_proj_hook("v", layer_index, on_qkv))
-        self.register(attn.o_proj, _make_proj_hook("o", layer_index, on_qkv))
+        if attn is not None:
+            for name in ("q", "k", "v", "o"):
+                projection = getattr(attn, f"{name}_proj", None)
+                if projection is not None:
+                    self.register(projection, _make_proj_hook(name, layer_index, on_qkv))
 
-        self.register(mlp.gate_proj, _make_gate_hook(layer_index, on_mlp))
-        self.register(mlp.up_proj, _make_up_hook(layer_index, on_mlp))
-        self.register(mlp.down_proj, _make_down_hook(layer_index, on_mlp))
+        if mlp is not None:
+            gate = getattr(mlp, "gate_proj", None)
+            up = getattr(mlp, "up_proj", None)
+            down = getattr(mlp, "down_proj", None)
+            if gate is not None:
+                self.register(gate, _make_gate_hook(layer_index, on_mlp, getattr(mlp, "act_fn", None)))
+            if up is not None:
+                self.register(up, _make_up_hook(layer_index, on_mlp))
+            if down is not None:
+                self.register(down, _make_down_hook(layer_index, on_mlp))
 
         self.register(layer, _make_layer_out_hook(layer_index, on_layer_out))
 
@@ -47,9 +55,10 @@ def _make_proj_hook(name: str, layer_index: int, on_qkv):
     return hook
 
 
-def _make_gate_hook(layer_index: int, on_mlp):
+def _make_gate_hook(layer_index: int, on_mlp, activation):
     def hook(module, args, output):
-        act = torch.nn.functional.silu(_detach(output))
+        raw = _detach(output)
+        act = activation(raw) if activation is not None else raw
         on_mlp(layer_index, "gate_activation", act)
         return output
 

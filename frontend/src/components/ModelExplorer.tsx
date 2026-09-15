@@ -14,8 +14,9 @@ export default function ModelExplorer() {
   const selectLayer = useBrain((s) => s.selectLayer)
   const selectHead = useBrain((s) => s.selectHead)
   const selectedHead = useBrain((s) => s.selectedHead)
+  const inspectionMode = useBrain((s) => s.inspectionMode)
   const [hardware, setHardware] = useState<HardwareReport | null>(null)
-  const [models, setModels] = useState<{ model_id: string; params_m: number; description: string }[]>([])
+  const [models, setModels] = useState<{ model_id: string; params_m: number; description: string; verification_status: string; verification_note: string }[]>([])
   const [providers, setProviders] = useState<ProviderDescriptor[]>([])
   const [loadError, setLoadError] = useState("")
 
@@ -70,6 +71,8 @@ export default function ModelExplorer() {
           <span className="v">{model?.dtype ?? "—"}</span>
           <span className="k">device</span>
           <span className="v">{model?.device ?? "—"}</span>
+          <span className="k">introspection</span>
+          <span className="v">{model ? Object.entries(model.capabilities ?? {}).filter(([, supported]) => supported).map(([name]) => name).join(", ") : "—"}</span>
         </div>
       </div>
 
@@ -77,13 +80,19 @@ export default function ModelExplorer() {
       <div className="card">
         <div className="kv">
           <span className="k">CPU</span>
-          <span className="v">{hardware ? `${hardware.cpu.count} cores` : "—"}</span>
+          <span className="v">{hardware ? `${hardware.cpu.model} · ${hardware.cpu.count} cores` : "—"}</span>
+          <span className="k">backend</span>
+          <span className="v">{hardware?.backend ?? "—"}</span>
+          <span className="k">model device</span>
+          <span className="v">{model?.device ?? hardware?.model_device ?? "—"}</span>
           <span className="k">RAM</span>
           <span className="v">{hardware ? `${hardware.ram.total_gb} GB` : "—"}</span>
           <span className="k">GPU</span>
-          <span className="v">{hardware?.gpu?.name ?? (hardware ? "none (CPU mode)" : "—")}</span>
+          <span className="v">{hardware?.gpu ? `${hardware.gpu.vendor} · ${hardware.gpu.name}` : (hardware ? "none detected" : "—")}</span>
           <span className="k">VRAM</span>
-          <span className="v">{hardware?.gpu ? `${hardware.gpu.vram_total_gb} GB` : "—"}</span>
+          <span className="v">{hardware?.gpu?.vram_total_gb !== null && hardware?.gpu?.vram_total_gb !== undefined ? `${hardware.gpu.vram_total_gb} GB` : "—"}</span>
+          <span className="k">PyTorch access</span>
+          <span className="v">{hardware ? (hardware.gpu_available ? "available" : "CPU fallback") : "—"}</span>
         </div>
       </div>
 
@@ -97,6 +106,9 @@ export default function ModelExplorer() {
               </div>
               <div className="muted" style={{ fontSize: 10 }}>
                 {m.params_m}M · {m.description.slice(0, 60)}
+              </div>
+              <div className="muted" style={{ fontSize: 10, color: m.verification_status === "verified" ? "var(--ok)" : "var(--warn)" }}>
+                {m.verification_status} · {m.verification_note}
               </div>
             </div>
             <button className="btn small" onClick={() => loadModel(m.model_id)} disabled={modelStatus === "loading" || model?.model_id === m.model_id}>
@@ -114,7 +126,7 @@ export default function ModelExplorer() {
             <div className="flex spread">
               <span className="mono" style={{ fontSize: 11 }}>{provider.display_name}</span>
               <span style={{ color: provider.inspection_mode === "deep" ? "var(--ok)" : "var(--warn)", fontSize: 10 }}>
-                {provider.inspection_mode === "deep" ? "DEEP" : "LIMITED"}
+                {provider.inspection_mode === "deep" ? "DEEP" : "LIMITED"} · {provider.availability}
               </span>
             </div>
             <div className="muted" style={{ fontSize: 10 }}>{provider.limitation}</div>
@@ -122,7 +134,7 @@ export default function ModelExplorer() {
         ))}
       </div>
 
-      {model && (
+      {model && inspectionMode !== "limited" && (
         <>
           <div className="panel-title">Layers</div>
           <div className="card">

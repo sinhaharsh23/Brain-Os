@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import { useBrain } from "../store/useBrainStore"
 import { api } from "../api/client"
 import type { AttentionResponse } from "../types"
+import ExternalObservationNotice from "../components/ExternalObservationNotice"
 
 function drawHeatmap(canvas: HTMLCanvasElement, data: AttentionResponse, tokens: { position: number; text: string }[], selectedToken: number | null) {
   const ctx = canvas.getContext("2d")
@@ -71,6 +72,7 @@ export default function AttentionView() {
   const [data, setData] = useState<AttentionResponse | null>(null)
   const [error, setError] = useState("")
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const inspectionMode = useBrain((s) => s.inspectionMode)
 
   const layer = selectedLayer ?? 0
   const head = selectedHead ?? 0
@@ -97,6 +99,8 @@ export default function AttentionView() {
   useEffect(() => {
     if (data && canvasRef.current) drawHeatmap(canvasRef.current, data, allTokens, selectedToken)
   }, [data, allTokens, selectedToken])
+
+  if (inspectionMode === "limited") return <ExternalObservationNotice />
 
   return (
     <div className="heatmap-wrap">

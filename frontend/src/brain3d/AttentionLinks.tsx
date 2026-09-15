@@ -6,9 +6,10 @@ import { RING_RADIUS, inputY, layerY, tokenAngle } from "./layout"
 interface AttentionLinksProps {
   numLayers: number
   visible: boolean
+  selectedOnly: boolean
 }
 
-export default function AttentionLinks({ numLayers, visible }: AttentionLinksProps) {
+export default function AttentionLinks({ numLayers, visible, selectedOnly }: AttentionLinksProps) {
   const links = useBrain((s) => s.attentionLinks)
   const totalTokens = useBrain((s) => s.tokens.length + s.generatedTokens.length)
   const activePosition = useBrain((s) => s.currentStep)
@@ -26,6 +27,7 @@ export default function AttentionLinks({ numLayers, visible }: AttentionLinksPro
       const fromY = layerY(layer, numLayers)
       for (const l of ls) {
         if (selectedHead !== null && l.head !== selectedHead) continue
+        if (selectedOnly && selectedToken !== null && l.token_index !== selectedToken) continue
         const toA = tokenAngle(l.token_index, Math.max(totalTokens, 1))
         const toY = inputY(numLayers)
         positions.push(0, fromY, 0)
@@ -40,7 +42,7 @@ export default function AttentionLinks({ numLayers, visible }: AttentionLinksPro
     geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3))
     geo.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3))
     return geo
-  }, [links, numLayers, totalTokens, selectedHead, model])
+  }, [links, numLayers, totalTokens, selectedHead, selectedOnly, selectedToken, model])
 
   void activePosition
   void selectedToken

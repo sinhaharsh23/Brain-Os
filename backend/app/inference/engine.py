@@ -33,6 +33,7 @@ class TensorStore:
     hidden: dict[int, torch.Tensor] = field(default_factory=dict)
     attention: dict[int, torch.Tensor] = field(default_factory=dict)
     logits: dict[int, torch.Tensor] = field(default_factory=dict)
+    logit_candidates: dict[int, list[dict[str, Any]]] = field(default_factory=dict)
     steps_total: int = 0
     full_pass_steps: set[int] = field(default_factory=set)
 
@@ -73,12 +74,14 @@ class TensorStore:
 
 
 class SessionRecord:
-    def __init__(self, session_id: str, prompt: str, model_id: str, params: dict[str, Any], metadata: dict[str, Any]) -> None:
+    def __init__(self, session_id: str, prompt: str, model_id: str, params: dict[str, Any], metadata: dict[str, Any], adapter=None) -> None:
         self.session_id = session_id
         self.prompt = prompt
         self.model_id = model_id
         self.params = params
         self.metadata = metadata
+        self.adapter = adapter
+        self.adapter_name = str(metadata.get("adapter_name") or getattr(adapter, "name", "unknown"))
         self.created_at = time.time()
         self.tokens: list[dict[str, Any]] = []
         self.events: list[dict[str, Any]] = []
@@ -103,10 +106,14 @@ class SessionRecord:
             "created_at": self.created_at,
             "num_tokens": len(self.tokens),
             "num_output_tokens": len(self.output_tokens),
+            "tokens": self.tokens,
+            "output_tokens": self.output_tokens,
             "response": self.response,
             "timings": self.timings,
             "errors": self.errors,
             "metadata": self.metadata,
+            "adapter_name": self.adapter_name,
+            "capture_available": False,
         }
 
 
@@ -121,20 +128,74 @@ class InferenceEngine:
         self._pause = threading.Event()
         self._pause.set()
         self._hooks_registered = False
+        self._closed = False
+        self._owner = None
+        self._archived: dict[str, SessionRecord] = {}
 
     @property
     def current_session(self) -> SessionRecord | None:
         return self._current
 
-    def cancel(self) -> None:
+    def restore_session(self, summary: dict[str, Any], capture: dict[str, Any]) -> SessionRecord:
+        session_id = str(summary["session_id"])
+        rec = SessionRecord(
+            session_id,
+            str(summary.get("prompt", "")),
+            str(summary.get("model_id", "")),
+            dict(summary.get("params", {})),
+            dict(summary.get("metadata", {})),
+        )
+        rec.adapter_name = str(summary.get("adapter_name") or rec.metadata.get("adapter_name", "unknown"))
+        rec.tokens = list(summary.get("tokens", []))
+        rec.output_tokens = list(summary.get("output_tokens", []))
+        rec.response = str(summary.get("response", ""))
+        rec.status = str(summary.get("status", "complete"))
+        rec.created_at = float(summary.get("created_at", rec.created_at))
+        rec.timings = dict(summary.get("timings", {}))
+        rec.errors = list(summary.get("errors", []))
+        store = rec.store
+        store.prompt_length = int(capture.get("prompt_length", len(rec.tokens)))
+        store.embeddings = capture.get("embeddings")
+        store.generated_embeddings = list(capture.get("generated_embeddings", []))
+        store.pca = dict(capture.get("pca", {}))
+        store.qkv = dict(capture.get("qkv", {}))
+        store.mlp = dict(capture.get("mlp", {}))
+        store.hidden = dict(capture.get("hidden", {}))
+        store.attention = dict(capture.get("attention", {}))
+        store.logits = dict(capture.get("logits", {}))
+        store.logit_candidates = dict(capture.get("logit_candidates", {}))
+        store.steps_total = int(capture.get("steps_total", 0))
+        self._archived[session_id] = rec
+        return rec
+
+    def cancel(self, owner=None) -> bool:
+        if owner is not None and self._owner is not owner:
+            return False
         self._cancel.set()
         self._pause.set()
+        return True
 
-    def pause(self) -> None:
+    def close(self) -> None:
+        self.cancel()
+        with self._lock:
+            self._closed = True
+            if self._hooks_registered:
+                self._hook_manager.remove_all()
+                self._hooks_registered = False
+            if hasattr(self, "_store_ref"):
+                self._store_ref["store"] = None
+
+    def pause(self, owner=None) -> bool:
+        if owner is not None and self._owner is not owner:
+            return False
         self._pause.clear()
+        return True
 
-    def resume(self) -> None:
+    def resume(self, owner=None) -> bool:
+        if owner is not None and self._owner is not owner:
+            return False
         self._pause.set()
+        return True
 
     @property
     def paused(self) -> bool:
@@ -170,26 +231,30 @@ class InferenceEngine:
         from app.instrumentation.hooks import HookManager
 
         self._hook_manager = HookManager(model)
-        for i, layer in enumerate(model.model.layers):
+        layers = getattr(getattr(model, "model", model), "layers", ())
+        for i, layer in enumerate(layers):
             self._hook_manager.register_layer_hooks(layer, i, on_qkv, on_mlp, on_layer_out)
         self._hooks_registered = True
         self._store_ref = store_ref
 
-    def run(self, prompt: str, params: dict[str, Any], on_event) -> None:
+    def run(self, prompt: str, params: dict[str, Any], on_event, owner=None, session_id: str | None = None) -> None:
         with self._lock:
+            if self._closed:
+                return
             self._cancel.clear()
             self._pause.set()
-            self._current = self._new_session(prompt, params)
+            self._owner = owner
+            self._current = self._new_session(prompt, params, session_id=session_id)
             try:
                 self._run_session(self._current, prompt, params, on_event)
             finally:
-                self._current.status = "complete" if not self._cancel.is_set() else "cancelled"
-                self._current.store.steps_total = self._current.store.steps_total
+                self._current.status = "cancelled" if self._cancel.is_set() else self._current.status
+                self._owner = None
 
-    def _new_session(self, prompt: str, params: dict[str, Any]) -> SessionRecord:
-        sid = uuid.uuid4().hex[:12]
+    def _new_session(self, prompt: str, params: dict[str, Any], session_id: str | None = None) -> SessionRecord:
+        sid = session_id or uuid.uuid4().hex[:12]
         metadata = self.adapter.metadata.to_dict() if self.adapter.is_loaded else {}
-        rec = SessionRecord(sid, prompt, self.adapter.model_id, params, metadata)
+        rec = SessionRecord(sid, prompt, self.adapter.model_id, params, metadata, adapter=self.adapter)
         rec.store.session_id = sid
         self._store_ref["store"] = rec.store
         return rec
@@ -218,6 +283,9 @@ class InferenceEngine:
                 "count": len(tokens),
                 "time_ms": round(tok_time * 1000, 2),
                 "input_shape": list(input_ids.shape),
+                "context_length": self.adapter.metadata.context_length,
+                "context_used": len(tokens),
+                "context_remaining": max(0, self.adapter.metadata.context_length - len(tokens)),
             },
         )
         rec.timings["tokenization_ms"] = tok_time * 1000
@@ -266,11 +334,17 @@ class InferenceEngine:
         t_gen_start = time.time()
 
         step = 0
+        pause_notified = False
         while step < max_new and not self._cancel.is_set():
+            if not self._pause.is_set() and not pause_notified:
+                self._emit(rec, on_event, "inference.paused", {"step": step, "reason": "between model steps"})
+                pause_notified = True
             self._pause.wait()
+            if pause_notified:
+                self._emit(rec, on_event, "inference.resumed", {"step": step})
+                pause_notified = False
             if self._cancel.is_set():
                 break
-            rec.store.steps_total = step
             is_first = step == 0
             step_input = (
                 input_ids
@@ -318,7 +392,9 @@ class InferenceEngine:
 
             layer_seq = rec.store.prompt_length + step
             for layer_i in range(self.adapter.metadata.num_layers):
-                hs_out = rec.store.hidden[(layer_i + 1, step)]
+                hs_out = rec.store.hidden.get((layer_i + 1, step))
+                if hs_out is None:
+                    continue
                 new_row = hs_out[-1] if is_first else hs_out[0]
                 self._emit(
                     rec,
@@ -338,7 +414,9 @@ class InferenceEngine:
 
             attn_links = []
             for layer_i in range(self.adapter.metadata.num_layers):
-                m = rec.store.attention[(layer_i, step)]
+                m = rec.store.attention.get((layer_i, step))
+                if m is None:
+                    continue
                 heads = m.shape[0]
                 all_links = []
                 for h in range(heads):
@@ -353,7 +431,9 @@ class InferenceEngine:
             qkv_stats = []
             for layer_i in range(self.adapter.metadata.num_layers):
                 for name in ("q", "k", "v"):
-                    t = rec.store.qkv[(layer_i, name, step)]
+                    t = rec.store.qkv.get((layer_i, name, step))
+                    if t is None:
+                        continue
                     row = t[-1] if is_first else t[0]
                     qkv_stats.append({"layer": layer_i, "name": name, "stats": vector_stats(row)})
             self._emit(rec, on_event, "qkv.captured", {"step": step, "layers": qkv_stats})
@@ -376,6 +456,7 @@ class InferenceEngine:
             logits = out["logits"][0, -1].to(torch.float32).cpu()
             rec.store.logits[step] = logits
             candidates = self.adapter.topk_candidates(logits, k=12, temperature=temperature)
+            rec.store.logit_candidates[step] = self.adapter.topk_candidates(logits, k=50, temperature=temperature)
             self._emit(
                 rec,
                 on_event,
@@ -394,6 +475,8 @@ class InferenceEngine:
             text = self.adapter.decode([token_id])
             rank = next((c["rank"] for c in candidates if c["token_id"] == token_id), None)
             gen_time_ms = (time.time() - t_gen_start) * 1000
+            if step == 0:
+                rec.timings["ttft_ms"] = round(gen_time_ms, 2)
             self._emit(
                 rec,
                 on_event,
@@ -421,7 +504,7 @@ class InferenceEngine:
                     "text": token_view(text),
                     "probability": prob,
                     "rank": rank,
-                    "position": rec.store.prompt_length + step - 1,
+                    "position": rec.store.prompt_length + step,
                 }
             )
             rec.response = self.adapter.decode(output_ids)
@@ -444,12 +527,14 @@ class InferenceEngine:
                     "text": token_view(text),
                     "probability": prob,
                     "rank": rank,
+                    "position": rec.store.prompt_length + step,
                     "output": rec.response,
                     "time_ms": round(gen_time_ms, 2),
                     "embedding": {"norm": float(emb_vec.norm()), "pca3": pc},
                 },
             )
             t_gen_start = time.time()
+            rec.store.steps_total = step + 1
             if token_id in eos_ids:
                 rec.timings["eos_reached"] = True
                 break
@@ -457,6 +542,20 @@ class InferenceEngine:
         elapsed = time.time() - t_start
         rec.timings["total_ms"] = round(elapsed * 1000, 2)
         rec.timings["tokens_per_second"] = round(len(rec.output_tokens) / max(elapsed, 1e-6), 2) if rec.output_tokens else 0.0
+        if self._cancel.is_set():
+            rec.status = "cancelled"
+            self._emit(
+                rec,
+                on_event,
+                "inference.cancelled",
+                {
+                    "summary": rec.summary(),
+                    "response": rec.response,
+                    "num_output_tokens": len(rec.output_tokens),
+                    "timings": rec.timings,
+                },
+            )
+            return
         rec.status = "complete"
         self._emit(
             rec,

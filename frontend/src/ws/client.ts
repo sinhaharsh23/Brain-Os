@@ -4,37 +4,54 @@ import { api } from "../api/client"
 let ws: WebSocket | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 let reconnectDelay = 500
+let shouldReconnect = true
 
 export function connect(): void {
+  shouldReconnect = true
   const proto = window.location.protocol === "https:" ? "wss" : "ws"
-  const url = `${proto}://${window.location.hostname}:8765/ws`
+  const token = localStorage.getItem("brainos_auth_token") ?? (import.meta.env.VITE_BRAINOS_TOKEN as string | undefined)
+  const configured = import.meta.env.VITE_BRAINOS_WS_URL as string | undefined
+  const baseUrl = configured ?? `${proto}://${window.location.host}/ws`
+  const url = `${baseUrl}${token ? `${baseUrl.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}` : ""}`
+  let socket: WebSocket
   try {
-    ws = new WebSocket(url)
+    socket = new WebSocket(url)
   } catch {
-    scheduleReconnect()
+    if (shouldReconnect) scheduleReconnect()
     return
   }
-  ws.onopen = () => {
+  ws = socket
+  socket.onopen = () => {
     reconnectDelay = 500
     useBrain.getState().set({ connected: true })
     api.sessions().then((s) => useBrain.getState().set({ sessions: s })).catch(() => {})
   }
-  ws.onmessage = (msg) => {
+  socket.onmessage = (msg) => {
     try {
       const ev = JSON.parse(msg.data as string)
-      if (ev.type === "ack") return
+      if (ev.type === "ack") {
+        const data = ev.data ?? {}
+        useBrain.getState().set({ runId: data.run_id ?? null, requestId: data.request_id ?? null, sessionId: data.session_id ?? null, queuePosition: data.queue_position ?? null, runStatus: "QUEUED" })
+        return
+      }
+      if (ev.type === "error") {
+        const data = ev.data ?? {}
+        useBrain.getState().set({ inferenceError: String(data.message ?? "WebSocket error"), runStatus: String(data.code ?? "ERROR") })
+        return
+      }
       useBrain.getState().dispatch(ev)
     } catch {
       /* malformed message */
     }
   }
-  ws.onclose = () => {
+  socket.onclose = () => {
+    if (ws !== socket) return
     useBrain.getState().set({ connected: false })
-    scheduleReconnect()
+    if (shouldReconnect) scheduleReconnect()
   }
-  ws.onerror = () => {
+  socket.onerror = () => {
     try {
-      ws?.close()
+      socket.close()
     } catch {
       /* ignore */
     }
@@ -57,10 +74,12 @@ export function send(action: string, payload: Record<string, unknown> = {}): voi
 }
 
 export function disconnect(): void {
+  shouldReconnect = false
   if (reconnectTimer) {
     clearTimeout(reconnectTimer)
     reconnectTimer = null
   }
-  ws?.close()
+  const socket = ws
   ws = null
+  socket?.close()
 }

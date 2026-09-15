@@ -1,8 +1,13 @@
 backend/.venv/
 backend/replay_sessions/*.json
+backend/replay_sessions/*.pt
+backend/*.db
+backend/*.db-*
 models/
 frontend/node_modules/
 frontend/dist/
+frontend/playwright-report/
+frontend/test-results/
 __pycache__/
 *.pyc
 .env

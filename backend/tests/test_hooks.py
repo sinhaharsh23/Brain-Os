@@ -91,3 +91,12 @@ def test_qkv_for_generated_position(engine):
     att = store.attention_for_position(0, first_gen_pos)
     assert att is not None
     assert att.shape[1] == 1
+
+
+def test_generated_positions_and_step_count_are_distinct(engine):
+    rec, _ = _run_sync(engine, "Position mapping across generated steps", {"max_new_tokens": 3})
+    positions = [token["position"] for token in rec.output_tokens]
+    assert positions == list(range(rec.store.prompt_length, rec.store.prompt_length + len(positions)))
+    assert len(set(positions)) == len(positions)
+    assert positions[0] != rec.store.prompt_length - 1
+    assert rec.store.steps_total == len(rec.output_tokens)

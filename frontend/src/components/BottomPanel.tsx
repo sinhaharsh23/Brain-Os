@@ -10,6 +10,8 @@ function OutputTab() {
   const generatedTokens = useBrain((s) => s.generatedTokens)
   const running = useBrain((s) => s.running)
   const summary = useBrain((s) => s.summary)
+  const inspectionMode = useBrain((s) => s.inspectionMode)
+  const usage = useBrain((s) => s.usage)
   return (
     <div>
       <div className="token-strip" style={{ marginBottom: 6 }}>
@@ -25,7 +27,8 @@ function OutputTab() {
       </div>
       {summary && (
         <div className="muted" style={{ fontSize: 10.5, marginTop: 4 }}>
-          {summary.num_output_tokens} tokens · {JSON.stringify(summary.timings.tokens_per_second)} tok/s · total {summary.timings.total_ms}ms
+          {inspectionMode === "limited" ? "External Observation" : `${summary.num_output_tokens} tokens`} · {summary.timings.tokens_per_second ?? "—"} tok/s · TTFT {summary.timings.ttft_ms ?? "—"}ms · total {summary.timings.total_ms}ms
+          {usage && ` · usage ${usage.input_tokens ?? "?"}/${usage.output_tokens ?? "?"}/${usage.total_tokens ?? "?"}`}
         </div>
       )}
     </div>

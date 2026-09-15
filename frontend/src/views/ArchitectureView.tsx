@@ -1,4 +1,5 @@
 import { useBrain } from "../store/useBrainStore"
+import ExternalObservationNotice from "../components/ExternalObservationNotice"
 
 const VIEW_H = 760
 const TOP = 90
@@ -13,7 +14,9 @@ export default function ArchitectureView() {
   const selectedLayer = useBrain((s) => s.selectedLayer)
   const tokens = useBrain((s) => s.tokens)
   const generatedTokens = useBrain((s) => s.generatedTokens)
+  const inspectionMode = useBrain((s) => s.inspectionMode)
 
+  if (inspectionMode === "limited") return <ExternalObservationNotice />
   if (!model) return <div className="muted" style={{ padding: 20 }}>model not loaded</div>
 
   const n = model.num_layers

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { useBrain } from "../store/useBrainStore"
 import { api } from "../api/client"
 import type { AttentionResponse, TensorVectorResponse } from "../types"
+import ExternalObservationNotice from "./ExternalObservationNotice"
 
 interface Loaded {
   embedding?: TensorVectorResponse
@@ -23,9 +24,12 @@ export default function Inspector() {
   const qkvStats = useBrain((s) => s.qkvStats)
   const mlpTop = useBrain((s) => s.mlpTop)
   const candidates = useBrain((s) => s.candidates)
+  const selectedNeuron = useBrain((s) => s.selectedNeuron)
+  const inspectionMode = useBrain((s) => s.inspectionMode)
   const [loaded, setLoaded] = useState<Loaded | null>(null)
   const [neuronSearch, setNeuronSearch] = useState("")
   const [loading, setLoading] = useState(false)
+  const [neuronValue, setNeuronValue] = useState<{ index: number; value: number } | null>(null)
 
   const tokenAt = (pos: number | null) => {
     if (pos === null) return null
@@ -58,15 +62,25 @@ export default function Inspector() {
     }
   }, [selectedToken, selectedLayer, selectedHead, sessionId])
 
+  useEffect(() => {
+    setNeuronValue(null)
+    if (!sessionId || !selectedNeuron) return
+    api.mlp(sessionId, selectedNeuron.layer, selectedToken ?? 0, 8, selectedNeuron.index)
+      .then((result) => setNeuronValue(result.neuron ?? null))
+      .catch(() => setNeuronValue(null))
+  }, [sessionId, selectedNeuron, selectedToken])
+
   const layer = selectedLayer ?? 0
   const token = tokenAt(selectedToken)
   void token
 
+  if (inspectionMode === "limited") return <ExternalObservationNotice />
+
   const showNeuron = () => {
-    if (!sessionId || selectedToken === null) return
+    if (!sessionId) return
     const mlp = mlpTop[layer]
     if (!mlp) return
-    const idx = Number(neuronSearch)
+    const idx = Number(neuronSearch || selectedNeuron?.index)
     const found = mlp.top.find((t) => t.index === idx)
     const row = found
       ? { label: `neuron ${idx} @ token`, value: `${token?.text ?? "—"} → ${found.value.toFixed(4)} (rank ${found.rank})` }
@@ -203,6 +217,12 @@ export default function Inspector() {
             </span>
             <span className="k">MLP max</span>
             <span className="v">{mlpTop[layer] ? mlpTop[layer].stats.max.toFixed(3) : "—"}</span>
+            {selectedNeuron && (
+              <>
+                <span className="k">selected unit</span>
+                <span className="v">#{selectedNeuron.index} = {neuronValue ? neuronValue.value.toFixed(5) : "loading…"}</span>
+              </>
+            )}
           </div>
           <div className="inspector-section">
             <h4>Neuron search</h4>

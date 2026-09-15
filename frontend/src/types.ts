@@ -17,14 +17,25 @@ export interface ModelMetadata {
   device: string
   tokenizer_name: string
   extra: Record<string, unknown>
+  capabilities: Record<string, boolean>
 }
 
 export interface HardwareReport {
   cpu: { count: number; percent: number; model: string }
   ram: { total_gb: number; available_gb: number; used_gb: number; percent: number }
-  gpu: { name: string; vram_total_gb: number; vram_used_gb: number } | null
+  gpu: { vendor: string; name: string; vram_total_gb: number | null; vram_used_gb: number | null; compute_available: boolean; pci_slot?: string | null } | null
+  gpu_vendor: string | null
+  gpu_name: string | null
+  backend: "CPU" | "MPS" | "CUDA" | "ROCm"
+  device: string
+  model_device: string
+  requested_device: "auto" | "cpu" | "mps" | "cuda"
+  gpu_available: boolean
   cuda_available: boolean
+  rocm_available: boolean
   torch_version: string
+  cuda_version: string | null
+  hip_version: string | null
 }
 
 export interface ProviderDescriptor {
@@ -36,6 +47,26 @@ export interface ProviderDescriptor {
   limitation: string
   capabilities: Record<string, boolean>
   models: string[]
+}
+
+export interface AuthUser {
+  id: string
+  username: string
+  created_at: string
+}
+
+export interface QueueState {
+  runId: string | null
+  requestId: string | null
+  runStatus: string
+  queuePosition: number | null
+  queueLimit: number | null
+}
+
+export interface ExternalUsage {
+  input_tokens?: number
+  output_tokens?: number
+  total_tokens?: number
 }
 
 export interface TokenInfo {
@@ -145,10 +176,13 @@ export interface Summary {
   status: string
   created_at: number
   num_tokens: number
-  num_output_tokens: number
+  num_output_tokens: number | null
   response: string
-  timings: Record<string, number | boolean>
+  timings: Record<string, number | boolean | null>
   errors: string[]
+  provider?: string
+  inspection_mode?: "deep" | "limited"
+  usage?: ExternalUsage | null
 }
 
 export interface SessionSummary {
@@ -157,7 +191,7 @@ export interface SessionSummary {
   model_id: string
   created_at: number
   status: string
-  num_output_tokens: number
+  num_output_tokens: number | null
   response: string
   timings: Record<string, number | boolean>
 }
@@ -175,6 +209,7 @@ export interface TensorVectorResponse {
   shape?: number[]
   dtype?: string
   token?: TokenInfo | GenToken
+  neuron?: { index: number; value: number }
 }
 
 export interface AttentionResponse {

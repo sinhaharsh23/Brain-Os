@@ -15,7 +15,13 @@ class EventBus:
     def __init__(self, max_history: int = 20000) -> None:
         self._subscribers: list[Callable[[Event], Coroutine[Any, Any, None]]] = []
         self._history: deque[Event] = deque(maxlen=max_history)
-        self._lock = asyncio.Lock()
+        self._lock: asyncio.Lock | None = None
+
+    @property
+    def lock(self) -> asyncio.Lock:
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
 
     def subscribe(self, handler: Callable[[Event], Coroutine[Any, Any, None]]) -> None:
         self._subscribers.append(handler)
@@ -31,7 +37,7 @@ class EventBus:
         return [e.to_dict() for e in self._history if e.ts >= since_ts]
 
     async def publish(self, event: Event) -> None:
-        async with self._lock:
+        async with self.lock:
             self._history.append(event)
         for handler in list(self._subscribers):
             try:

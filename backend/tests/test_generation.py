@@ -1,6 +1,9 @@
 import asyncio
 
+import torch
+
 from app.inference.engine import InferenceEngine
+from app.models.qwen import pick_dtype
 
 
 def _run(engine, prompt, params):
@@ -16,6 +19,17 @@ def _run(engine, prompt, params):
 
     asyncio.run(go())
     return engine.current_session, events
+
+
+def test_cpu_auto_dtype_is_numerically_stable():
+    assert pick_dtype("cpu", "auto") is torch.float32
+
+
+def test_zero_temperature_sampling_is_finite(adapter):
+    token_id, probability = adapter.sample(torch.tensor([1.0, 3.0, 2.0]), temperature=0.0)
+    assert token_id == 1
+    assert torch.isfinite(torch.tensor(probability))
+    assert 0.0 <= probability <= 1.0
 
 
 def test_generation_produces_real_tokens(engine):
@@ -46,5 +60,19 @@ def test_probabilities_are_valid(engine):
 
 
 def test_cancellation(engine):
-    rec, _ = _run(engine, "Tell me a very long story about a dragon", {"max_new_tokens": 200})
-    assert rec.status == "complete"
+    events = []
+
+    def on_event(event):
+        events.append(event.type)
+        if event.type == "token.generated" and event.data["step"] == 0:
+            engine.cancel()
+
+    async def go():
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, lambda: engine.run("Tell me a long story", {"max_new_tokens": 200}, on_event))
+
+    asyncio.run(go())
+    rec = engine.current_session
+    assert rec.status == "cancelled"
+    assert "inference.cancelled" in events
+    assert "inference.complete" not in events

@@ -5,7 +5,20 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-os.environ.setdefault("BRAINOS_HF_HOME", os.environ.get("HF_HOME", "/home/harsh-sinha/BrainOS/models/hf"))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+os.environ.setdefault("BRAINOS_HF_HOME", os.environ.get("HF_HOME", os.path.join(PROJECT_ROOT, "models", "hf")))
+
+
+@pytest.fixture(autouse=True)
+def isolate_request_rate_limiter(monkeypatch):
+    """Keep module-global HTTP/WS limiter state isolated between tests.
+
+    This changes test setup only; production keeps the configured limiter.
+    The RateLimiter unit test still covers enforcement at a real low limit.
+    """
+    from app.security import RateLimiter
+
+    monkeypatch.setattr("app.main.request_limiter", RateLimiter(limit=100_000, window_seconds=60))
 
 MODEL_ID = "Qwen/Qwen2.5-0.5B-Instruct"
 

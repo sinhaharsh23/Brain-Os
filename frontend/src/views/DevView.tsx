@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react"
 import { useBrain } from "../store/useBrainStore"
 import { api } from "../api/client"
+import ExternalObservationNotice from "../components/ExternalObservationNotice"
 
 export default function DevView() {
   const devLog = useBrain((s) => s.devLog)
   const timeline = useBrain((s) => s.timeline)
   const sessions = useBrain((s) => s.sessions)
   const model = useBrain((s) => s.model)
+  const inspectionMode = useBrain((s) => s.inspectionMode)
   const [events, setEvents] = useState<Record<string, unknown>[]>([])
   const [selectedSession, setSelectedSession] = useState("")
   const [tensorResults, setTensorResults] = useState<string[]>([])
@@ -46,6 +48,8 @@ export default function DevView() {
   useEffect(() => {
     api.sessions().then((s) => useBrain.getState().set({ sessions: s })).catch(() => {})
   }, [])
+
+  if (inspectionMode === "limited") return <ExternalObservationNotice />
 
   return (
     <div style={{ padding: 12, overflowY: "auto", height: "100%", fontFamily: "var(--mono)", fontSize: 11 }}>
@@ -92,7 +96,7 @@ export default function DevView() {
       <div style={{ maxHeight: 200, overflowY: "auto" }}>
         {timeline.map((e, i) => (
           <div key={i} className="info">
-            <span className="t">{(e.ts / 1000).toFixed(1)}s</span>
+            <span className="t">{Math.max(0, e.ts - (timeline[0]?.ts ?? e.ts)).toFixed(2)}s</span>
             [{e.type}] {e.label}
           </div>
         ))}

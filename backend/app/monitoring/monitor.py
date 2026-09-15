@@ -31,9 +31,18 @@ class SystemMonitor:
             "ts": time.time(),
         }
         if torch.cuda.is_available():
-            stats["gpu_percent"] = round(_gpu_utilization(), 1)
+            utilization = _gpu_utilization()
+            stats["gpu_percent"] = round(utilization, 1) if utilization is not None else None
             stats["vram_used_gb"] = round(torch.cuda.memory_allocated() / (1024**3), 3)
             stats["vram_total_gb"] = round(torch.cuda.get_device_properties(0).total_memory / (1024**3), 2)
+        elif hasattr(torch, "backends") and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            stats["gpu_percent"] = None
+            if hasattr(torch, "mps") and hasattr(torch.mps, "current_allocated_memory"):
+                try:
+                    stats["vram_used_gb"] = round(torch.mps.current_allocated_memory() / (1024**3), 3)
+                except Exception:
+                    stats["vram_used_gb"] = None
+            stats["vram_total_gb"] = stats["ram_total_gb"]
         self._history.append(stats)
         if len(self._history) > self._max_history:
             self._history = self._history[-self._max_history :]
@@ -43,7 +52,7 @@ class SystemMonitor:
         return self._history
 
 
-def _gpu_utilization() -> float:
+def _gpu_utilization() -> float | None:
     try:
         import pynvml
 
@@ -53,4 +62,4 @@ def _gpu_utilization() -> float:
         pynvml.nvmlShutdown()
         return float(util.gpu)
     except Exception:
-        return 0.0
+        return None

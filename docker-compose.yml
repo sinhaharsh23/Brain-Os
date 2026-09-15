@@ -1,0 +1,32 @@
+services:
+  brainos:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: brainos:local
+    restart: unless-stopped
+    ports:
+      - "8765:8765"
+    env_file:
+      - .env
+    environment:
+      BRAINOS_HOST: 0.0.0.0
+      BRAINOS_PORT: 8765
+      HF_HOME: /data/huggingface
+      BRAINOS_REPLAY_DIR: /data/replay_sessions
+      BRAINOS_DATABASE_URL: sqlite:////data/brainos/brainos.db
+    volumes:
+      - brainos-model-cache:/data/huggingface
+      - brainos-replay:/data/replay_sessions
+      - brainos-database:/data/brainos
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/api/ready', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 120s
+      retries: 5
+
+volumes:
+  brainos-model-cache:
+  brainos-replay:
+  brainos-database:

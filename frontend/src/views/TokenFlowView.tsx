@@ -1,4 +1,5 @@
 import { useBrain } from "../store/useBrainStore"
+import ExternalObservationNotice from "../components/ExternalObservationNotice"
 
 export default function TokenFlowView() {
   const tokens = useBrain((s) => s.tokens)
@@ -8,6 +9,9 @@ export default function TokenFlowView() {
   const pca = useBrain((s) => s.pca)
   const running = useBrain((s) => s.running)
   const currentStep = useBrain((s) => s.currentStep)
+  const inspectionMode = useBrain((s) => s.inspectionMode)
+
+  if (inspectionMode === "limited") return <ExternalObservationNotice />
 
   return (
     <div style={{ padding: 12, overflowY: "auto", height: "100%" }}>

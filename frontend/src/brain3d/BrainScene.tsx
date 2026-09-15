@@ -1,4 +1,4 @@
-import { Suspense, useState } from "react"
+import { Suspense, useEffect, useState } from "react"
 import { Canvas } from "@react-three/fiber"
 import { OrbitControls, Grid, Stars } from "@react-three/drei"
 import { useBrain } from "../store/useBrainStore"
@@ -7,6 +7,7 @@ import TokenRing from "./TokenRing"
 import AttentionLinks from "./AttentionLinks"
 import FlowParticle from "./FlowParticle"
 import EmbeddingCloud from "./EmbeddingCloud"
+import NeuronNodes from "./NeuronNodes"
 import { bottomOfStack, inputY, layerY, outputY } from "./layout"
 
 function OutputBeam({ numLayers }: { numLayers: number }) {
@@ -59,11 +60,46 @@ function LayerLabels({ numLayers }: { numLayers: number }) {
 export default function BrainScene() {
   const model = useBrain((s) => s.model)
   const [showAttention, setShowAttention] = useState(true)
+  const [selectedAttentionOnly, setSelectedAttentionOnly] = useState(false)
   const [showCloud, setShowCloud] = useState(false)
   const [showTokens, setShowTokens] = useState(true)
+  const [showNeurons, setShowNeurons] = useState(true)
   const numLayers = model?.num_layers ?? 24
   const running = useBrain((s) => s.running)
   const response = useBrain((s) => s.response)
+  const tokens = useBrain((s) => s.tokens)
+  const generatedTokens = useBrain((s) => s.generatedTokens)
+  const attentionLinks = useBrain((s) => s.attentionLinks)
+  const benchmarkMode = import.meta.env.DEV || new URLSearchParams(window.location.search).has("benchmark")
+  const [fps, setFps] = useState<number | null>(null)
+  const [minFps, setMinFps] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (!benchmarkMode) return
+    let animationId = 0
+    let frames = 0
+    let minimum = Number.POSITIVE_INFINITY
+    let windowStart = performance.now()
+
+    const sample = (now: number) => {
+      frames += 1
+      const elapsed = now - windowStart
+      if (elapsed >= 1000) {
+        const current = (frames * 1000) / elapsed
+        minimum = Math.min(minimum, current)
+        setFps(Math.round(current * 10) / 10)
+        setMinFps(Math.round(minimum * 10) / 10)
+        frames = 0
+        windowStart = now
+      }
+      animationId = requestAnimationFrame(sample)
+    }
+    animationId = requestAnimationFrame(sample)
+    return () => cancelAnimationFrame(animationId)
+  }, [benchmarkMode])
+
+  const renderedNodes = tokens.length + generatedTokens.length + numLayers
+  const renderedEdges = Object.values(attentionLinks).reduce((count, links) => count + links.length, 0)
 
   return (
     <div style={{ width: "100%", height: "100%", position: "relative" }}>
@@ -77,7 +113,8 @@ export default function BrainScene() {
         <Suspense fallback={null}>
           <TransformerStack numLayers={numLayers} />
           {showTokens && <TokenRing numLayers={numLayers} />}
-          <AttentionLinks numLayers={numLayers} visible={showAttention} />
+          <AttentionLinks numLayers={numLayers} visible={showAttention} selectedOnly={selectedAttentionOnly} />
+          <NeuronNodes numLayers={numLayers} visible={showNeurons} />
           <FlowParticle numLayers={numLayers} />
           <OutputBeam numLayers={numLayers} />
           <EmbeddingCloud visible={showCloud} />
@@ -103,12 +140,20 @@ export default function BrainScene() {
           attention links
         </label>
         <label className="muted" style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 11, fontFamily: "var(--mono)" }}>
+          <input type="checkbox" checked={selectedAttentionOnly} onChange={(e) => setSelectedAttentionOnly(e.target.checked)} />
+          selected token only
+        </label>
+        <label className="muted" style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 11, fontFamily: "var(--mono)" }}>
           <input type="checkbox" checked={showTokens} onChange={(e) => setShowTokens(e.target.checked)} />
           tokens
         </label>
         <label className="muted" style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 11, fontFamily: "var(--mono)" }}>
           <input type="checkbox" checked={showCloud} onChange={(e) => setShowCloud(e.target.checked)} />
           embedding PCA cloud
+        </label>
+        <label className="muted" style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 11, fontFamily: "var(--mono)" }}>
+          <input type="checkbox" checked={showNeurons} onChange={(e) => setShowNeurons(e.target.checked)} />
+          top-K MLP units
         </label>
       </div>
 
@@ -136,6 +181,16 @@ export default function BrainScene() {
           {response ? `▶ ${response.slice(0, 120)}${response.length > 120 ? "…" : ""}` : "output appears here"}
         </span>
       </div>
+
+      {benchmarkMode && (
+        <div className="neural-fps-probe mono" data-testid="neural-fps-probe">
+          <span>FRAME PROBE · {running ? "ACTIVE" : "IDLE"}</span>
+          <strong>{fps === null ? "—" : `${fps} FPS`}</strong>
+          <span>MIN {minFps === null ? "—" : `${minFps} FPS`}</span>
+          <span>NODES {renderedNodes}</span>
+          <span>EDGES {renderedEdges}</span>
+        </div>
+      )}
     </div>
   )
 }
