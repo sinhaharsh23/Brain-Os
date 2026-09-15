@@ -140,6 +140,85 @@ jobs:
           print("PostgreSQL runtime persistence/ownership/rollback/concurrency PASS")
           PY
 
+  backup-restore-runtime:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: brainos
+          POSTGRES_PASSWORD: brainos-ci-password
+          POSTGRES_DB: brainos
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U brainos -d brainos"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install database runtime dependencies
+        run: python -m pip install -r backend/requirements-runtime.txt
+      - name: Verify PostgreSQL backup and restore
+        env:
+          BRAINOS_DATABASE_URL: postgresql+psycopg://brainos:brainos-ci-password@127.0.0.1:5432/brainos
+          POSTGRES_DUMP_URL: postgresql://brainos:brainos-ci-password@127.0.0.1:5432/brainos
+          PYTHONPATH: backend
+        run: |
+          set -euo pipefail
+          command -v pg_dump
+          command -v pg_restore
+          python -m alembic -c alembic.ini upgrade head
+          python - <<'PY'
+          import os
+          from app.persistence import Persistence
+
+          persistence = Persistence(os.environ["BRAINOS_DATABASE_URL"])
+          user, _ = persistence.register("backup-owner", "backup secure password")
+          workspace = persistence.create_workspace(user["id"], "Backup workspace")
+          project = persistence.create_project(user["id"], workspace["id"], "Backup project")
+          persistence.create_session("backup-session", user["id"], "backup prompt", project["id"])
+          persistence.engine.dispose()
+          print("backup fixture created")
+          PY
+          pg_dump --format=custom --no-owner --file "$RUNNER_TEMP/brainos.dump" "$POSTGRES_DUMP_URL"
+          test -s "$RUNNER_TEMP/brainos.dump"
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, text
+
+          engine = create_engine(os.environ["BRAINOS_DATABASE_URL"])
+          with engine.begin() as connection:
+              connection.execute(text("DROP SCHEMA public CASCADE"))
+              connection.execute(text("CREATE SCHEMA public"))
+          engine.dispose()
+          print("database cleared for restore")
+          PY
+          pg_restore --no-owner --no-privileges --dbname "$POSTGRES_DUMP_URL" "$RUNNER_TEMP/brainos.dump"
+          python - <<'PY'
+          import os
+          from sqlalchemy import select
+          from app.persistence import BrainSession, Persistence, Project, User, Workspace
+
+          persistence = Persistence(os.environ["BRAINOS_DATABASE_URL"])
+          with persistence.db() as db:
+              user = db.scalar(select(User).where(User.username == "backup-owner"))
+              assert user is not None
+              workspace = db.scalar(select(Workspace).where(Workspace.name == "Backup workspace"))
+              assert workspace is not None and workspace.owner_id == user.id
+              project = db.scalar(select(Project).where(Project.name == "Backup project"))
+              assert project is not None and project.workspace_id == workspace.id and project.owner_id == user.id
+              session = db.get(BrainSession, "backup-session")
+              assert session is not None and session.project_id == project.id and session.owner_id == user.id
+          assert persistence.owns_session("backup-session", user.id)
+          persistence.engine.dispose()
+          print("PostgreSQL backup/restore PASS")
+          PY
+
   frontend:
     runs-on: ubuntu-latest
     steps:
