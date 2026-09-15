@@ -61,12 +61,16 @@ jobs:
           docker run --rm --entrypoint sh brainos:ci -c 'test ! -e /app/.env && test ! -d /app/models/hf'
       - name: Start production container
         env:
-          BRAINOS_RUNTIME_VOLUME: brainos-runtime-${{ github.run_id }}
+          BRAINOS_VOLUME_PREFIX: brainos-runtime-${{ github.run_id }}
         run: |
           set -euo pipefail
-          docker volume create "$BRAINOS_RUNTIME_VOLUME"
+          docker volume create "${BRAINOS_VOLUME_PREFIX}-hf"
+          docker volume create "${BRAINOS_VOLUME_PREFIX}-replay"
+          docker volume create "${BRAINOS_VOLUME_PREFIX}-database"
           docker run --detach --name brainos-runtime-ci --publish 8765:8765 \
-            --volume "$BRAINOS_RUNTIME_VOLUME:/data" \
+            --volume "$BRAINOS_VOLUME_PREFIX-hf:/data/huggingface" \
+            --volume "$BRAINOS_VOLUME_PREFIX-replay:/data/replay_sessions" \
+            --volume "$BRAINOS_VOLUME_PREFIX-database:/data/brainos" \
             --env BRAINOS_HOST=0.0.0.0 \
             --env BRAINOS_PORT=8765 \
             --env BRAINOS_DEVICE=cpu \
@@ -110,7 +114,9 @@ jobs:
           docker stop --time 30 brainos-runtime-ci
           docker rm brainos-runtime-ci
           docker run --detach --name brainos-runtime-ci --publish 8765:8765 \
-            --volume "brainos-runtime-${{ github.run_id }}:/data" \
+            --volume "brainos-runtime-${{ github.run_id }}-hf:/data/huggingface" \
+            --volume "brainos-runtime-${{ github.run_id }}-replay:/data/replay_sessions" \
+            --volume "brainos-runtime-${{ github.run_id }}-database:/data/brainos" \
             --env BRAINOS_HOST=0.0.0.0 \
             --env BRAINOS_PORT=8765 \
             --env BRAINOS_DEVICE=cpu \
@@ -135,7 +141,10 @@ jobs:
         run: |
           docker stop --time 30 brainos-runtime-ci || true
           docker rm brainos-runtime-ci || true
-          docker volume rm brainos-runtime-${{ github.run_id }} || true
+          docker volume rm \
+            brainos-runtime-${{ github.run_id }}-hf \
+            brainos-runtime-${{ github.run_id }}-replay \
+            brainos-runtime-${{ github.run_id }}-database || true
 
   browser:
     runs-on: ubuntu-latest
