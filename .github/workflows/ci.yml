@@ -55,6 +55,7 @@ jobs:
       - name: Verify PostgreSQL persistence ownership rollback and concurrency
         env:
           BRAINOS_DATABASE_URL: postgresql+psycopg://brainos:brainos-ci-password@127.0.0.1:5432/brainos
+          PYTHONPATH: backend
         run: |
           set -euo pipefail
           python - <<'PY'
