@@ -3,7 +3,7 @@ backend/replay_sessions/*.json
 backend/replay_sessions/*.pt
 backend/*.db
 backend/*.db-*
-models/
+/models/
 frontend/node_modules/
 frontend/dist/
 frontend/playwright-report/
