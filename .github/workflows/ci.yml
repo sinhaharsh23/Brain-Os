@@ -21,6 +21,124 @@ jobs:
           BRAINOS_HF_HOME: ${{ runner.temp }}/huggingface
         run: python -m pytest backend/tests -q
 
+  postgresql-runtime:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: brainos
+          POSTGRES_PASSWORD: brainos-ci-password
+          POSTGRES_DB: brainos
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U brainos -d brainos"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install database runtime dependencies
+        run: python -m pip install -r backend/requirements-runtime.txt
+      - name: Apply Alembic migrations and verify current head
+        env:
+          BRAINOS_DATABASE_URL: postgresql+psycopg://brainos:brainos-ci-password@127.0.0.1:5432/brainos
+        run: |
+          set -euo pipefail
+          python -m alembic -c alembic.ini upgrade head
+          python -m alembic -c alembic.ini current
+          python -m alembic -c alembic.ini upgrade head
+      - name: Verify PostgreSQL persistence ownership rollback and concurrency
+        env:
+          BRAINOS_DATABASE_URL: postgresql+psycopg://brainos:brainos-ci-password@127.0.0.1:5432/brainos
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import concurrent.futures
+          import os
+
+          from sqlalchemy import inspect, select, text
+          from sqlalchemy.exc import IntegrityError
+
+          from app.persistence import (
+              EXPECTED_TABLES,
+              BrainSession,
+              Persistence,
+              Project,
+              User,
+              migrate_database,
+          )
+
+          url = os.environ["BRAINOS_DATABASE_URL"]
+          assert url.startswith("postgresql+psycopg://")
+          migrate_database(url)
+
+          persistence = Persistence(url)
+          assert persistence.engine.dialect.name == "postgresql"
+          tables = set(inspect(persistence.engine).get_table_names())
+          assert EXPECTED_TABLES.issubset(tables)
+          with persistence.engine.connect() as connection:
+              assert connection.execute(text("SELECT 1")).scalar_one() == 1
+
+          user_a, token_a = persistence.register("postgres-owner-a", "postgres secure password a")
+          user_b, token_b = persistence.register("postgres-owner-b", "postgres secure password b")
+          assert persistence.user_for_token(token_a)["id"] == user_a["id"]
+          assert persistence.user_for_token(token_b)["id"] == user_b["id"]
+          workspace = persistence.create_workspace(user_a["id"], "PostgreSQL workspace")
+          project = persistence.create_project(user_a["id"], workspace["id"], "PostgreSQL project")
+          assert persistence.get_workspace(user_b["id"], workspace["id"]) is None
+          assert persistence.get_project(user_b["id"], project["id"]) is None
+          assert persistence.update_project(user_b["id"], project["id"], name="intrusion") is None
+          persistence.create_session("postgres-session", user_a["id"], "persistent prompt", project["id"])
+          persistence.create_run("postgres-run", "postgres-request", "postgres-session", user_a["id"], "postgres-connection", "persistent prompt", "qwen")
+          persistence.update_run("postgres-run", "COMPLETED")
+
+          # A new engine represents an application restart; all relational data must remain.
+          persistence.engine.dispose()
+          restarted = Persistence(url)
+          assert restarted.user_for_token(token_a)["username"] == "postgres-owner-a"
+          assert restarted.owns_session("postgres-session", user_a["id"])
+          assert not restarted.owns_session("postgres-session", user_b["id"])
+          with restarted.db() as db:
+              assert db.get(Project, project["id"]).name == "PostgreSQL project"
+
+          # The foreign-key failure must roll back the entire transaction.
+          try:
+              with restarted.db() as db:
+                  db.add(User(id="rolled-back-user", username="rolled-back-user", password_hash="test"))
+                  db.flush()
+                  db.add(Project(id="orphan-project", owner_id="rolled-back-user", workspace_id="missing-workspace", name="orphan"))
+                  db.commit()
+          except IntegrityError:
+              pass
+          else:
+              raise AssertionError("foreign-key violation did not fail")
+          with restarted.db() as db:
+              assert db.scalar(select(User).where(User.id == "rolled-back-user")) is None
+
+          def concurrent_register(index: int) -> str:
+              local = Persistence(url)
+              try:
+                  user, _ = local.register(f"postgres-concurrent-{index}", "concurrent secure password")
+                  return user["username"]
+              finally:
+                  local.engine.dispose()
+
+          with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+              names = list(pool.map(concurrent_register, range(16)))
+          assert len(names) == 16 and len(set(names)) == 16
+          with restarted.db() as db:
+              count = db.scalar(select(User).where(User.username.like("postgres-concurrent-%")).order_by(User.username))
+              assert count is not None
+
+          restarted.engine.dispose()
+          print("PostgreSQL runtime persistence/ownership/rollback/concurrency PASS")
+          PY
+
   frontend:
     runs-on: ubuntu-latest
     steps:
