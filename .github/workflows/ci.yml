@@ -497,6 +497,109 @@ jobs:
           docker volume rm brainos-proxy-ci-hf brainos-proxy-ci-replay brainos-proxy-ci-database || true
           docker network rm brainos-proxy-ci || true
 
+  cloud-readiness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate provider-neutral deployment contract
+        run: |
+          set -euo pipefail
+          test -f Dockerfile
+          test -f docker-compose.yml
+          test -f deploy/nginx/brainos.conf.example
+          grep -q 'BRAINOS_AUTH_MODE' .env.example
+          grep -q 'BRAINOS_DATABASE_URL' .env.example
+          grep -q 'BRAINOS_CORS_ORIGINS' .env.example
+          grep -q 'BRAINOS_DATABASE_AUTO_MIGRATE' .env.example
+          grep -q 'BRAINOS_AUTH_TOKEN' DEPLOYMENT.md
+          grep -q 'BRAINOS_DATABASE_URL' DEPLOYMENT.md
+          grep -q 'WebSocket' DEPLOYMENT.md
+          git check-ignore -q .env
+          git check-ignore -q models/hf
+          test -z "$(git ls-files -- .env 'models/hf/**')"
+          echo "provider-neutral cloud deployment contract PASS"
+          echo "No cloud deployment attempted: no provider or target is configured."
+
+  production-load-smoke:
+    runs-on: ubuntu-latest
+    needs: websocket-proxy-runtime
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build production image
+        run: docker build --tag brainos:load-ci .
+      - name: Start isolated production-shaped service
+        run: |
+          set -euo pipefail
+          docker volume create brainos-load-ci-hf
+          docker volume create brainos-load-ci-replay
+          docker volume create brainos-load-ci-database
+          docker run --detach --name brainos-load-ci --publish 8765:8765 \
+            --volume brainos-load-ci-hf:/data/huggingface \
+            --volume brainos-load-ci-replay:/data/replay_sessions \
+            --volume brainos-load-ci-database:/data/brainos \
+            --env BRAINOS_HOST=0.0.0.0 \
+            --env BRAINOS_PORT=8765 \
+            --env BRAINOS_DEVICE=cpu \
+            --env HF_HOME=/data/huggingface \
+            --env BRAINOS_REPLAY_DIR=/data/replay_sessions \
+            --env BRAINOS_DATABASE_URL=sqlite:////data/brainos/brainos.db \
+            brainos:load-ci
+      - name: Wait for service readiness
+        run: |
+          set -euo pipefail
+          for attempt in {1..180}; do
+            if curl --fail --silent http://127.0.0.1:8765/api/ready | grep -q '"status":"ready"'; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs brainos-load-ci
+          exit 1
+      - name: Run bounded concurrent real-generation smoke
+        run: |
+          set -euo pipefail
+          docker exec brainos-load-ci python - <<'PY'
+          import asyncio
+          import json
+          import time
+
+          import websockets
+
+          async def generate(client_index: int) -> dict:
+              started = time.perf_counter()
+              async with websockets.connect("ws://127.0.0.1:8765/ws", open_timeout=30) as socket:
+                  await socket.send(json.dumps({
+                      "action": "run",
+                      "provider": "qwen-local",
+                      "prompt": f"Load smoke client {client_index}: answer with one word.",
+                      "params": {"max_new_tokens": 1, "temperature": 0.0, "top_p": 1.0, "top_k": 1},
+                  }))
+                  events = 0
+                  while True:
+                      event = json.loads(await asyncio.wait_for(socket.recv(), timeout=180))
+                      events += 1
+                      if event.get("type") == "inference.complete":
+                          assert event.get("data", {}).get("summary", {}).get("status") == "completed"
+                          return {"client": client_index, "events": events, "elapsed_s": round(time.perf_counter() - started, 3)}
+                      if event.get("type") in {"inference.failed", "inference.timeout"}:
+                          raise AssertionError(f"inference failed for client {client_index}: {event}")
+
+          async def main() -> None:
+              results = await asyncio.gather(*(generate(index) for index in range(1, 5)))
+              print(json.dumps({"concurrent_clients": len(results), "results": results}))
+
+          asyncio.run(main())
+          PY
+      - name: Capture load-service logs on failure
+        if: failure()
+        run: docker logs brainos-load-ci || true
+      - name: Stop and remove load-service stack
+        if: always()
+        run: |
+          docker stop --time 30 brainos-load-ci || true
+          docker rm brainos-load-ci || true
+          docker volume rm brainos-load-ci-hf brainos-load-ci-replay brainos-load-ci-database || true
+
   browser:
     runs-on: ubuntu-latest
     steps:
