@@ -55,6 +55,87 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build production image
         run: docker build --tag brainos:ci .
+      - name: Verify image excludes local secrets and model cache
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint sh brainos:ci -c 'test ! -e /app/.env && test ! -d /app/models/hf'
+      - name: Start production container
+        env:
+          BRAINOS_RUNTIME_VOLUME: brainos-runtime-${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          docker volume create "$BRAINOS_RUNTIME_VOLUME"
+          docker run --detach --name brainos-runtime-ci --publish 8765:8765 \
+            --volume "$BRAINOS_RUNTIME_VOLUME:/data" \
+            --env BRAINOS_HOST=0.0.0.0 \
+            --env BRAINOS_PORT=8765 \
+            --env BRAINOS_DEVICE=cpu \
+            --env HF_HOME=/data/huggingface \
+            --env BRAINOS_REPLAY_DIR=/data/replay_sessions \
+            --env BRAINOS_DATABASE_URL=sqlite:////data/brainos/brainos.db \
+            brainos:ci
+      - name: Wait for container readiness
+        run: |
+          set -euo pipefail
+          for attempt in {1..180}; do
+            if curl --fail --silent http://127.0.0.1:8765/api/ready > /tmp/brainos-ready.json; then
+              grep -q '"status":"ready"' /tmp/brainos-ready.json
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs brainos-runtime-ci
+          exit 1
+      - name: Verify container endpoints and WebSocket
+        run: |
+          set -euo pipefail
+          curl --fail --silent http://127.0.0.1:8765/api/health | grep -q '"status":"ok"'
+          curl --fail --silent http://127.0.0.1:8765/ | grep -q 'id="root"'
+          curl --fail --silent http://127.0.0.1:8765/api/hardware | grep -q '"device":"cpu"'
+          docker exec brainos-runtime-ci python -c '
+          import asyncio
+          import websockets
+
+          async def probe():
+              async with websockets.connect("ws://127.0.0.1:8765/ws") as socket:
+                  await socket.recv()
+              print("websocket connected")
+
+          asyncio.run(probe())
+          '
+      - name: Verify persistent volume and restart
+        run: |
+          set -euo pipefail
+          docker exec brainos-runtime-ci sh -c 'printf persistent > /data/brainos/ci-marker'
+          docker stop --time 30 brainos-runtime-ci
+          docker rm brainos-runtime-ci
+          docker run --detach --name brainos-runtime-ci --publish 8765:8765 \
+            --volume "brainos-runtime-${{ github.run_id }}:/data" \
+            --env BRAINOS_HOST=0.0.0.0 \
+            --env BRAINOS_PORT=8765 \
+            --env BRAINOS_DEVICE=cpu \
+            --env HF_HOME=/data/huggingface \
+            --env BRAINOS_REPLAY_DIR=/data/replay_sessions \
+            --env BRAINOS_DATABASE_URL=sqlite:////data/brainos/brainos.db \
+            brainos:ci
+          for attempt in {1..180}; do
+            if curl --fail --silent http://127.0.0.1:8765/api/ready > /dev/null; then
+              docker exec brainos-runtime-ci test -f /data/brainos/ci-marker
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs brainos-runtime-ci
+          exit 1
+      - name: Capture container logs on failure
+        if: failure()
+        run: docker logs brainos-runtime-ci || true
+      - name: Stop and remove runtime container
+        if: always()
+        run: |
+          docker stop --time 30 brainos-runtime-ci || true
+          docker rm brainos-runtime-ci || true
+          docker volume rm brainos-runtime-${{ github.run_id }} || true
 
   browser:
     runs-on: ubuntu-latest
