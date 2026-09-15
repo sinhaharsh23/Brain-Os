@@ -219,6 +219,41 @@ jobs:
           print("PostgreSQL backup/restore PASS")
           PY
 
+  security-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install configuration dependencies
+        run: python -m pip install -r backend/requirements-runtime.txt
+      - name: Verify production-shaped security configuration
+        env:
+          PYTHONPATH: backend
+        run: |
+          set -euo pipefail
+          git check-ignore -q .env
+          git check-ignore -q models/hf
+          test -z "$(git ls-files -- .env 'models/hf/**')"
+          python - <<'PY'
+          from app.config import Settings
+
+          production = Settings(
+              host="0.0.0.0",
+              auth_mode="multi_user",
+              cors_origins="https://brainos.example",
+              database_url="postgresql+psycopg://app:password@db/brainos",
+              database_auto_migrate=False,
+          )
+          assert production.auth_mode == "multi_user"
+          assert production.database_url.startswith("postgresql+psycopg://")
+          assert production.cors_origins == "https://brainos.example"
+          assert production.database_auto_migrate is False
+          assert Settings().host == "127.0.0.1"
+          print("production security configuration PASS")
+          PY
+
   frontend:
     runs-on: ubuntu-latest
     steps:
