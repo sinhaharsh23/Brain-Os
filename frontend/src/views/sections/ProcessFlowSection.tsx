@@ -2,6 +2,7 @@ import { useMemo } from "react"
 import { useBrain } from "../../store/useBrainStore"
 
 export default function ProcessFlowSection() {
+  const telemetry = useBrain((s) => s.telemetry)
   const prompt = useBrain((s) => s.prompt)
   const tokens = useBrain((s) => s.tokens)
   const generatedTokens = useBrain((s) => s.generatedTokens)
@@ -13,17 +14,18 @@ export default function ProcessFlowSection() {
 
   const isComplete = !running && generatedTokens.length > 0
   const totalTokens = tokens.length + generatedTokens.length
-  const maxContext = model?.context_length ?? 32768
-  const vectorDim = model?.hidden_size ?? 896
-  const numLayers = model?.num_layers ?? 24
-  const numParams = model?.num_params ? `${(model.num_params / 1e6).toFixed(0)}M` : "~0.5B (494M)"
+  const maxContext = model?.context_length ?? "—"
+  const vectorDim = model?.hidden_size ?? "—"
+  const numLayers = model?.num_layers ?? "—"
+  const numParams = model?.num_params ? `${(model.num_params / 1e6).toFixed(0)}M` : "—"
 
   // 4x3 mini embedding heatmap
   const embeddingCells = useMemo(() => {
     if (pca?.tokens?.length) {
-      return pca.tokens.slice(0, 12).map((t) => Math.min(1, Math.max(0.15, t.norm / 15)))
+      const maximum = Math.max(...pca.tokens.map((token) => token.norm), 1e-6)
+      return pca.tokens.slice(0, 12).map((t) => t.norm / maximum)
     }
-    return [0.4, 0.7, 0.3, 0.9, 0.8, 0.2, 0.6, 0.5, 0.3, 0.8, 0.9, 0.4]
+    return []
   }, [pca])
 
   return (
@@ -53,12 +55,12 @@ export default function ProcessFlowSection() {
           <div className="step-card-body">
             <div className="user-input-snippet">
               <span className="user-avatar-tiny">🧑‍💻</span>
-              <span className="user-prompt-text text-bright truncate" title={prompt || "What is AI?"}>
-                {prompt ? `"${prompt}"` : "What is AI?"}
+              <span className="user-prompt-text text-bright truncate" title={prompt || "No input"}>
+                {prompt ? `"${prompt}"` : "No input"}
               </span>
             </div>
             <div className="step-meta text-xxs text-dim">
-              <span>PROMPT TOK: <b className="text-cyan">{tokens.length}</b></span>
+              <span title="Includes system, history and chat-template markers">USER TEXT TOKENS: {telemetry?.tokens.user_text_tokens ?? "—"} · MODEL INPUT TOKENS: <b className="text-cyan">{tokens.length}</b></span>
             </div>
           </div>
         </div>
@@ -81,15 +83,11 @@ export default function ProcessFlowSection() {
                   </span>
                 ))
               ) : (
-                <>
-                  <span className="flow-tok-chip prompt">What</span>
-                  <span className="flow-tok-chip prompt">is</span>
-                  <span className="flow-tok-chip prompt">AI</span>
-                </>
+                <span className="text-dim">No captured tokens</span>
               )}
             </div>
             <div className="step-meta text-xxs text-dim">
-              <span>TOTAL: <b className="text-cyan">{totalTokens || 3}</b> / {maxContext}</span>
+              <span>TOTAL: <b className="text-cyan">{totalTokens}</b> / {maxContext}</span>
             </div>
           </div>
         </div>
@@ -97,7 +95,7 @@ export default function ProcessFlowSection() {
         <div className="flow-arrow-sep">➔</div>
 
         {/* Step 3: Embedding */}
-        <div className={`flow-step-card ${pca || tokens.length > 0 ? "active-card" : ""}`}>
+        <div className={`flow-step-card ${pca ? "active-card" : ""}`}>
           <div className="step-card-header flex items-center justify-between">
             <span className="step-num">03</span>
             <span className="step-badge">VECTOR</span>
@@ -113,7 +111,7 @@ export default function ProcessFlowSection() {
                     backgroundColor: `rgba(0, 210, 255, ${val})`,
                     boxShadow: val > 0.7 ? "0 0 3px #00d2ff" : "none",
                   }}
-                  title={`Dim ${i}: ${val.toFixed(2)}`}
+                  title={`Token ${pca?.tokens[i]?.position}: norm ${pca?.tokens[i]?.norm.toFixed(3)}`}
                 />
               ))}
             </div>
@@ -179,7 +177,7 @@ export default function ProcessFlowSection() {
               {running && <span className="streaming-cursor">▮</span>}
             </div>
             <div className="step-meta text-xxs text-dim">
-              <span>OUTPUT TOK: <b className="text-amber">{generatedTokens.length}</b> / 512</span>
+              <span>OUTPUT TOK: <b className="text-amber">{generatedTokens.length}</b></span>
             </div>
           </div>
         </div>
@@ -204,9 +202,9 @@ export default function ProcessFlowSection() {
             </div>
             <div className="step-meta text-xxs text-dim">
               {summary ? (
-                <span>LATENCY: <b className="text-emerald">{((summary.timings?.total_ms as number) / 1000 || 1.12).toFixed(2)}s</b></span>
+                <span>LATENCY: <b className="text-emerald">{((summary.timings?.total_ms as number) / 1000).toFixed(2)}s</b></span>
               ) : (
-                <span>LATENCY: <b className="text-emerald">1.12s</b></span>
+                <span>LATENCY: <b className="text-emerald">—</b></span>
               )}
             </div>
           </div>

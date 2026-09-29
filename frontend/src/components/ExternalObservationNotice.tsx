@@ -1,6 +1,9 @@
+import TelemetryDetails from "./TelemetryDetails"
 import { useBrain } from "../store/useBrainStore"
 
 const names: Record<string, string> = {
+  ollama: "Ollama",
+  gemini: "Google Gemini",
   openai: "OpenAI / ChatGPT",
   anthropic: "Anthropic / Claude",
   google: "Google Gemini",
@@ -9,19 +12,19 @@ const names: Record<string, string> = {
 export default function ExternalObservationNotice() {
   const provider = useBrain((s) => s.provider)
   const providerModel = useBrain((s) => s.providerModel)
-  const response = useBrain((s) => s.response)
   const usage = useBrain((s) => s.usage)
   const summary = useBrain((s) => s.summary)
 
   return (
     <div className="card" style={{ margin: 12, maxWidth: 760 }}>
       <div className="panel-title" style={{ marginTop: 0, color: "var(--warn)" }}>
-        External Observation · {names[provider ?? ""] ?? provider ?? "provider"}
+        Runtime Observation · {names[provider ?? ""] ?? provider ?? "provider"}
       </div>
       <p className="muted">
         Model: <span className="mono">{providerModel || "provider default"}</span>. The provider API exposes response text and metadata only; BrainOS does not invent private tokens, embeddings, hidden states, attention, Q/K/V, logits, or MLP activations.
       </p>
-      {response && <div style={{ whiteSpace: "pre-wrap", margin: "10px 0", lineHeight: 1.5 }}>{response}</div>}
+      {provider === "ollama" && <p className="muted">Internal transformer tensors are not exposed by the Ollama API. Switch to Native Model mode for full tensor inspection. Raw user input → Ollama request → prompt evaluation → streamed response → final runtime metrics.</p>}
+      <TelemetryDetails />
       {(usage || summary?.timings) && (
         <div className="kv">
           <span className="k">time</span>

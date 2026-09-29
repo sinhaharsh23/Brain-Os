@@ -7,7 +7,7 @@ export default function TrainingHubView() {
     <div className="section-page-container mono">
       <div className="section-header-wrap flex items-center justify-between">
         <div>
-          <h2 className="section-title">TRAINING HUB (MODEL ADAPTATION & LORA)</h2>
+          <h2 className="section-title">DEMO DATA · TRAINING HUB (MODEL ADAPTATION & LORA)</h2>
           <span className="section-subtitle text-dim text-xs">
             Fine-tuning checkpoints, loss telemetry, and learning rate scheduling
           </span>

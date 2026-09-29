@@ -26,6 +26,7 @@ class ModelMetadata:
     device: str
     max_position_embeddings: int = 0
     tokenizer_name: str = ""
+    model_memory_mb: float = 0.0
     extra: dict[str, Any] = field(default_factory=dict)
     capabilities: dict[str, bool] = field(default_factory=dict)
 
@@ -48,6 +49,7 @@ class ModelMetadata:
             "quantization": self.quantization,
             "device": self.device,
             "tokenizer_name": self.tokenizer_name,
+            "model_memory_mb": self.model_memory_mb,
             "extra": self.extra,
             "capabilities": self.capabilities,
         }
@@ -64,14 +66,14 @@ class TokenInfo:
         return {"text": self.text, "id": self.id, "position": self.position, "is_special": self.is_special}
 
 
-class ModelAdapter(ABC):
+class BaseModelAdapter(ABC):
     metadata: ModelMetadata
 
     @abstractmethod
     def load(self) -> None: ...
 
     @abstractmethod
-    def tokenize(self, text: str, max_tokens: int | None = None, use_chat_template: bool = True) -> tuple[list[TokenInfo], torch.Tensor, float]: ...
+    def tokenize(self, text: str, max_tokens: int | None = None, use_chat_template: bool = True, messages: list[dict[str, str]] | None = None) -> tuple[list[TokenInfo], torch.Tensor, float]: ...
 
     @abstractmethod
     def embed(self, input_ids: torch.Tensor) -> torch.Tensor: ...
@@ -103,3 +105,44 @@ class ModelAdapter(ABC):
     @property
     @abstractmethod
     def is_loaded(self) -> bool: ...
+
+    # Submodule accessors for deep introspection
+    @abstractmethod
+    def get_transformer_layers(self) -> list[torch.nn.Module]: ...
+
+    @abstractmethod
+    def get_embedding_module(self) -> torch.nn.Module: ...
+
+    @abstractmethod
+    def get_attention_module(self, layer_idx: int) -> torch.nn.Module | None: ...
+
+    @abstractmethod
+    def get_q_projection(self, layer_idx: int) -> torch.nn.Module | None: ...
+
+    @abstractmethod
+    def get_k_projection(self, layer_idx: int) -> torch.nn.Module | None: ...
+
+    @abstractmethod
+    def get_v_projection(self, layer_idx: int) -> torch.nn.Module | None: ...
+
+    @abstractmethod
+    def get_o_projection(self, layer_idx: int) -> torch.nn.Module | None: ...
+
+    @abstractmethod
+    def get_mlp_module(self, layer_idx: int) -> torch.nn.Module | None: ...
+
+    @abstractmethod
+    def get_final_norm(self) -> torch.nn.Module | None: ...
+
+    @abstractmethod
+    def get_lm_head(self) -> torch.nn.Module | None: ...
+
+    @abstractmethod
+    def project_hidden_state_to_logits(self, hidden_state: torch.Tensor) -> torch.Tensor: ...
+
+    @abstractmethod
+    def get_architecture_tree(self, max_depth: int = 3) -> dict[str, Any]: ...
+
+
+# Alias for backward compatibility
+ModelAdapter = BaseModelAdapter

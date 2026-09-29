@@ -124,20 +124,15 @@ def discover_physical_gpus(capabilities: TorchCapabilities | None = None) -> lis
             )
         )
     if not gpus and capabilities is not None and capabilities.mps_available:
-        try:
-            import psutil
-            vm = psutil.virtual_memory()
-            total_gb = round(vm.total / (1024**3), 2)
-            used_gb = round(vm.used / (1024**3), 2)
-        except Exception:
-            total_gb = None
-            used_gb = None
         gpus.append(
             PhysicalGpu(
                 vendor="Apple",
                 name="Apple Silicon GPU (Metal/MPS)",
-                vram_total_gb=total_gb,
-                vram_used_gb=used_gb,
+                # Apple Silicon uses unified memory. Do not expose system
+                # RAM as VRAM; MPS-specific allocation is reported by the
+                # system monitor when PyTorch exposes it.
+                vram_total_gb=None,
+                vram_used_gb=None,
             )
         )
     return sorted(gpus, key=lambda gpu: gpu.vram_total_gb or 0.0, reverse=True)

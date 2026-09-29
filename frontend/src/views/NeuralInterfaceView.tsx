@@ -9,10 +9,6 @@ import { useBrain } from "../store/useBrainStore"
 export default function NeuralInterfaceView() {
   const inspectionMode = useBrain((s) => s.inspectionMode)
 
-  if (inspectionMode === "limited") {
-    return <ExternalObservationNotice />
-  }
-
   return (
     <div className="neural-interface-view">
       {/* Top Prompt Interaction Bar */}
@@ -20,7 +16,11 @@ export default function NeuralInterfaceView() {
         <PromptBar />
       </div>
 
-      <div className="neural-interface-scrollable">
+      {inspectionMode === "limited" ? (
+        <div className="neural-interface-scrollable">
+          <ExternalObservationNotice />
+        </div>
+      ) : <div className="neural-interface-scrollable">
         {/* SECTION 1: How BrainOS 3.0 Works - Full Process Flow */}
         <section className="interface-section">
           <ProcessFlowSection />
@@ -40,7 +40,7 @@ export default function NeuralInterfaceView() {
         <section className="interface-section">
           <PerformanceMetricsSection />
         </section>
-      </div>
+      </div>}
     </div>
   )
 }

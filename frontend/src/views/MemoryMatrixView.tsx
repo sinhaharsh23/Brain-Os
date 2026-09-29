@@ -4,69 +4,71 @@ import { useMockKnowledgeBase } from "../hooks/useMocks"
 export default function MemoryMatrixView() {
   const tokens = useBrain((s) => s.tokens)
   const generatedTokens = useBrain((s) => s.generatedTokens)
+  const telemetry = useBrain((s) => s.telemetry)
+  const provider = useBrain((s) => s.provider)
+  const cache = useBrain((s) => s.kvCache[s.currentStep])
   const model = useBrain((s) => s.model)
   const running = useBrain((s) => s.running)
   const { docs } = useMockKnowledgeBase()
 
-  const totalTokens = tokens.length + generatedTokens.length
-  const maxTokens = model?.context_length ?? 32768
-  const kvCacheBytes = totalTokens * 24 * 64 * 4 * 2 // 24 layers, 64 dim, float16 (2 bytes), K+V
-  const kvKb = (kvCacheBytes / 1024).toFixed(1)
+  const totalTokens = telemetry?.tokens.sequence_tokens ?? (provider === "ollama" ? null : tokens.length + generatedTokens.length)
+  const maxTokens = telemetry?.model.context_window ?? (provider === "ollama" ? null : model?.context_length) ?? null
+  const kvKb = cache?.total_kb?.toFixed(1) ?? "Unavailable"
 
   return (
     <div className="section-page-container mono">
       <div className="section-header-wrap flex items-center justify-between">
         <div>
-          <h2 className="section-title">MEMORY MATRIX (CONTEXT STORAGE & KV CACHE)</h2>
+          <h2 className="section-title">{provider === "ollama" ? "MEMORY MATRIX (CONTEXT & PROVIDER CACHE)" : "MEMORY MATRIX (CONTEXT STORAGE & KV CACHE)"}</h2>
           <span className="section-subtitle text-dim text-xs">
-            Dynamic transformer Key-Value cache and vectorized knowledge context
+            {provider === "ollama" ? "Ollama prompt-cache counts when returned; transformer K/V tensors are unavailable." : "Captured transformer Key-Value cache and vectorized model input context"}
           </span>
         </div>
-        <span className="badge-cyan">{totalTokens} TOKENS OCCUPIED</span>
+        <span className="badge-cyan">{totalTokens ?? "Unavailable"} SEQUENCE TOKENS</span>
       </div>
 
       <div className="memory-matrix-grid">
         {/* KV Cache Overview Card */}
         <div className="telemetry-card">
           <div className="card-header">
-            <span className="card-title">TRANSFORMER KV CACHE ALLOCATION</span>
+            <span className="card-title">{provider === "ollama" ? "OLLAMA PROMPT CACHE" : "TRANSFORMER KV CACHE"}</span>
             <span className={`badge-${running ? "amber" : "emerald"}`}>
-              {running ? "ALLOCATING" : "SYNCED"}
+              {running ? "ALLOCATING" : (cache ? "CAPTURED" : "UNAVAILABLE")}
             </span>
           </div>
           <div className="kv-stats-row">
             <div className="stat-pill">
-              <span className="stat-pill-label">OCCUPIED TOKENS</span>
-              <span className="stat-pill-val text-cyan">{totalTokens} / {maxTokens}</span>
+              <span className="stat-pill-label">{provider === "ollama" ? "CACHED PROMPT TOKENS" : "KV CACHE SEQUENCE LENGTH"}</span>
+              <span className="stat-pill-val text-cyan">{provider === "ollama" ? telemetry?.tokens.cached_prompt_tokens ?? "Unavailable" : `${cache?.seq_length ?? "Unavailable"} / ${maxTokens ?? "Unavailable"}`}</span>
             </div>
             <div className="stat-pill">
-              <span className="stat-pill-label">VRAM FOOTPRINT</span>
-              <span className="stat-pill-val text-amber">{kvKb} KB</span>
+              <span className="stat-pill-label">{provider === "ollama" ? "K/V TENSOR BYTES" : "CAPTURED CACHE BYTES"}</span>
+              <span className="stat-pill-val text-amber">{provider === "ollama" ? "Unavailable" : `${kvKb} KB`}</span>
             </div>
             <div className="stat-pill">
-              <span className="stat-pill-label">CACHE SLOTS</span>
-              <span className="stat-pill-val">2 KV Heads (GQA)</span>
+              <span className="stat-pill-label">{provider === "ollama" ? "K/V TENSOR METADATA" : "CACHE SLOTS"}</span>
+              <span className="stat-pill-val">{provider === "ollama" ? "Unavailable" : `${model?.num_kv_heads ?? "Unavailable"} KV Heads`}</span>
             </div>
           </div>
-          <div className="kv-cache-visual-strip">
+          {provider !== "ollama" && <div className="kv-cache-visual-strip">
             {Array.from({ length: 32 }).map((_, idx) => {
-              const isFilled = idx < Math.ceil((totalTokens / maxTokens) * 32) || (idx < 6 && totalTokens > 0)
+              const isFilled = idx < Math.ceil(((cache?.seq_length ?? 0) / (maxTokens ?? 1)) * 32)
               return (
                 <div
                   key={idx}
                   className={`kv-slot-cell ${isFilled ? "slot-filled" : ""}`}
-                  title={`KV Cache Block #${idx}`}
+                  title="Relative captured sequence length; not individual cache blocks"
                 />
               )
             })}
-          </div>
+          </div>}
         </div>
 
-        {/* Knowledge Base Documents (Context Feed) */}
+        {/* Knowledge Base (DEMO DATA only when enabled) Documents (Context Feed) */}
         <div className="telemetry-card">
           <div className="card-header">
             <span className="card-title">KNOWLEDGE BASE INGESTION (RAG)</span>
-            <span className="badge-outline text-xxs">TODO: RAG ENDPOINTS</span>
+            <span className="badge-outline text-xxs">{docs.length ? "DEMO DATA" : "NO INDEX DATA"}</span>
           </div>
           <div className="kb-docs-list">
             {docs.map((d) => (

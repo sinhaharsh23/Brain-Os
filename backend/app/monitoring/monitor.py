@@ -27,6 +27,11 @@ class SystemMonitor:
             "gpu_percent": None,
             "vram_used_gb": None,
             "vram_total_gb": None,
+            "accelerator_memory_label": "Unavailable",
+            "accelerator_allocated_gb": None,
+            "accelerator_total_gb": None,
+            "mps_driver_allocated_gb": None,
+            "sources": {"cpu_percent": "psutil", "ram": "psutil", "process_ram_gb": "psutil", "accelerator_allocated_gb": "pytorch_allocator", "gpu_percent": "nvml_if_available"},
             "model_loaded": model_loaded,
             "ts": time.time(),
         }
@@ -35,14 +40,22 @@ class SystemMonitor:
             stats["gpu_percent"] = round(utilization, 1) if utilization is not None else None
             stats["vram_used_gb"] = round(torch.cuda.memory_allocated() / (1024**3), 3)
             stats["vram_total_gb"] = round(torch.cuda.get_device_properties(0).total_memory / (1024**3), 2)
+            stats["accelerator_memory_label"] = "CUDA VRAM"
+            stats["accelerator_allocated_gb"] = stats["vram_used_gb"]
+            stats["accelerator_total_gb"] = stats["vram_total_gb"]
         elif hasattr(torch, "backends") and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
             stats["gpu_percent"] = None
             if hasattr(torch, "mps") and hasattr(torch.mps, "current_allocated_memory"):
                 try:
-                    stats["vram_used_gb"] = round(torch.mps.current_allocated_memory() / (1024**3), 3)
+                    stats["accelerator_allocated_gb"] = round(torch.mps.current_allocated_memory() / (1024**3), 3)
                 except Exception:
-                    stats["vram_used_gb"] = None
-            stats["vram_total_gb"] = stats["ram_total_gb"]
+                    stats["accelerator_allocated_gb"] = None
+            stats["accelerator_memory_label"] = "MPS allocated memory"
+            stats["accelerator_total_gb"] = None
+            try:
+                stats["mps_driver_allocated_gb"] = round(torch.mps.driver_allocated_memory() / (1024**3), 3)
+            except (AttributeError, RuntimeError):
+                pass
         self._history.append(stats)
         if len(self._history) > self._max_history:
             self._history = self._history[-self._max_history :]

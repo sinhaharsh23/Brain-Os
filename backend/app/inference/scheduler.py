@@ -192,6 +192,9 @@ class InferenceScheduler:
             elif event.type == "inference.cancelled":
                 run.status = "TIMED_OUT" if run.status == "TIMED_OUT" else "CANCELLED"
                 run.finished_at = time.time()
+            elif event.type == "inference.failed":
+                run.status = "FAILED"
+                run.finished_at = time.time()
             elif event.type == "inference.paused":
                 run.status = "PAUSED"
             elif event.type == "inference.resumed":

@@ -17,6 +17,7 @@ const QUICK_TABS: { id: ViewMode; label: string }[] = [
 export default function TopBar() {
   const connected = useBrain((s) => s.connected)
   const model = useBrain((s) => s.model)
+  const telemetry = useBrain((s) => s.telemetry)
   const modelStatus = useBrain((s) => s.modelStatus)
   const running = useBrain((s) => s.running)
   const currentStep = useBrain((s) => s.currentStep)
@@ -32,7 +33,7 @@ export default function TopBar() {
   const isHealthy = connected && modelStatus === "loaded" && !running
   const displayedModel = inspectionMode === "limited" 
     ? (providerModel || provider || "external")
-    : (model?.model_id ?? "Qwen/Qwen2.5-0.5B-Instruct")
+    : (model?.model_id ?? "Unavailable")
 
   const isTabActive = (id: ViewMode) => {
     if (view === id) return true
@@ -71,13 +72,13 @@ export default function TopBar() {
       <div className="topbar-status-strip mono">
         <div className="status-pill status-opt">
           <span className={`status-dot ${isHealthy ? "ok" : running ? "warn" : "bad"}`} />
-          <span className="pill-text">SYSTEM STATUS: {connected ? "OPTIMAL" : "OFFLINE"}</span>
+          <span className="pill-text">SYSTEM STATUS: {!connected ? "OFFLINE" : running ? "GENERATING" : telemetry?.model.status ?? (modelStatus === "loaded" ? "READY" : modelStatus === "loading" ? "LOADING" : "ERROR")}</span>
         </div>
 
         <div className="status-pill status-engine">
           <span className={`status-dot ${running ? "engine-active" : "ok"}`} />
           <span className="pill-text">
-            NEURAL ENGINE: {running ? `ACTIVE · STEP ${currentStep}` : "ACTIVE"}
+            INFERENCE ENGINE: {running ? (inspectionMode === "limited" ? "GENERATING" : `GENERATING · STEP ${currentStep}`) : "IDLE"}
           </span>
         </div>
 
@@ -109,10 +110,10 @@ export default function TopBar() {
 
       {/* Right: Power / User */}
       <div className="topbar-actions mono">
-        <div className="battery-widget" title={`Power Source: ${battery.charging ? "AC Connected" : "Internal Battery"}`}>
+        <div className="battery-widget" title={`Power Source: ${battery.charging === null ? "Unavailable" : battery.charging ? "AC Connected" : "Internal Battery"}`}>
           <span className="battery-icon">{battery.charging ? "⚡" : "🔋"}</span>
-          <span className="battery-level">{battery.level}%</span>
-          <span className="battery-mode text-dim">[PWR: {battery.charging ? "AC" : "BAT"}]</span>
+          <span className="battery-level">{battery.level === null ? "Unavailable" : `${battery.level}%`}</span>
+          <span className="battery-mode text-dim">[PWR: {battery.charging === null ? "—" : battery.charging ? "AC" : "BAT"}]</span>
         </div>
 
         <div className="user-profile-badge" title="Active Operator Session">

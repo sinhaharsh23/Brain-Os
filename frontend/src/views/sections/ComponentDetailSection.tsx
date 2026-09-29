@@ -10,17 +10,23 @@ export default function ComponentDetailSection() {
   const summary = useBrain((s) => s.summary)
   const running = useBrain((s) => s.running)
   const candidates = useBrain((s) => s.candidates)
+  const pca = useBrain((s) => s.pca)
+  const activeLayer = useBrain((s) => s.activeLayer)
+  const lastLogits = useBrain((s) => s.lastLogits)
+  const telemetry = useBrain((s) => s.telemetry)
+  const provider = useBrain((s) => s.provider)
 
-  const numLayers = model?.num_layers ?? 24
-  const vectorDim = model?.hidden_size ?? 896
+  const numLayers = model?.num_layers ?? 0
+  const vectorDim = model?.hidden_size ?? 0
 
   const activeLayerIndex = useMemo(() => {
     const layerKeys = Object.keys(layers).map(Number)
-    if (layerKeys.length === 0) return 0
+    if (running && activeLayer !== null) return activeLayer
+    if (layerKeys.length === 0) return -1
     return Math.max(...layerKeys)
-  }, [layers])
+  }, [layers, running, activeLayer])
 
-  const layerProgressPct = Math.min(100, Math.round(((activeLayerIndex + 1) / numLayers) * 100))
+  const layerProgressPct = Math.min(100, Math.round(((activeLayerIndex + 1) / Math.max(1, numLayers)) * 100))
 
   return (
     <div className="component-detail-container mono">
@@ -29,7 +35,7 @@ export default function ComponentDetailSection() {
           <span className="section-title-tag">DETAILED WORKING OF EACH COMPONENT</span>
           <span className="badge-outline text-xxs">5-COMPONENT INTERNAL STACK</span>
         </div>
-        <span className="text-xxs text-dim">QWEN2.5 MPS FORWARD HOOKS</span>
+        <span className="text-xxs text-dim">{provider === "ollama" ? "LLAMA.CPP GRAPH CAPTURE" : "LOCAL MODEL FORWARD HOOKS"}</span>
       </div>
 
       <div className="component-panels-grid">
@@ -52,12 +58,7 @@ export default function ComponentDetailSection() {
                 </thead>
                 <tbody>
                   {tokens.length === 0 ? (
-                    <>
-                      <tr><td className="text-dim">#0</td><td className="text-bright font-bold">What</td><td className="text-cyan">3838</td><td className="text-dim">BPE</td></tr>
-                      <tr><td className="text-dim">#1</td><td className="text-bright font-bold">is</td><td className="text-cyan">374</td><td className="text-dim">BPE</td></tr>
-                      <tr><td className="text-dim">#2</td><td className="text-bright font-bold">AI</td><td className="text-cyan">9552</td><td className="text-dim">BPE</td></tr>
-                      <tr><td className="text-dim">#3</td><td className="text-bright font-bold">?</td><td className="text-cyan">30</td><td className="text-dim">BPE</td></tr>
-                    </>
+                    <tr><td colSpan={4} className="text-dim">No captured tokens</td></tr>
                   ) : (
                     tokens.slice(0, 4).map((t) => (
                       <tr key={t.position}>
@@ -74,8 +75,8 @@ export default function ComponentDetailSection() {
               </table>
             </div>
             <div className="panel-footer-stat flex items-center justify-between text-xxs">
-              <span>VOCAB: <b>151.9k</b></span>
-              <span>COUNT: <b className="text-cyan">{tokens.length || 4}</b></span>
+              <span>USER TEXT TOKENS: <b>{telemetry?.tokens.user_text_tokens ?? "—"}</b> · VOCAB: <b>{model?.vocab_size?.toLocaleString() ?? "—"}</b></span>
+              <span title="Includes system instructions, history, chat-template markers and the current user message">MODEL INPUT TOKENS: <b className="text-cyan">{tokens.length}</b></span>
             </div>
           </div>
         </div>
@@ -88,8 +89,8 @@ export default function ComponentDetailSection() {
           </div>
           <div className="panel-body">
             <div className="vector-bars-list">
-              {(tokens.length > 0 ? tokens.slice(0, 4) : [{ position: 0, text: "What", id: 3838 }, { position: 1, text: "is", id: 374 }, { position: 2, text: "AI", id: 9552 }, { position: 3, text: "?", id: 30 }]).map((tok, idx) => {
-                const pseudoNorm = 11 + ((tok.id * 7) % 15)
+              {(pca?.tokens.slice(0, 4) ?? []).map((tok, idx) => {
+                const maxNorm = Math.max(...(pca?.tokens.map((token) => token.norm) ?? [1]), 1e-6)
                 return (
                   <div key={tok.position} className="vector-bar-row">
                     <span className="vector-tok-label text-xxs truncate">
@@ -99,21 +100,21 @@ export default function ComponentDetailSection() {
                       <div
                         className="vector-bar-fill"
                         style={{
-                          width: `${Math.min(100, (pseudoNorm / 28) * 100)}%`,
+                          width: `${Math.min(100, (tok.norm / maxNorm) * 100)}%`,
                           backgroundColor: idx % 2 === 0 ? "#00d2ff" : "#ffb648",
                         }}
                       />
                     </div>
                     <span className="vector-norm-label text-xxs text-dim">
-                      {pseudoNorm.toFixed(1)}
+                      norm {tok.norm.toFixed(3)}
                     </span>
                   </div>
                 )
               })}
             </div>
             <div className="panel-footer-stat flex items-center justify-between text-xxs">
-              <span>ROPE: <b>θ=1M</b></span>
-              <span>SHAPE: <b className="text-cyan">[1, {tokens.length || 4}, {vectorDim}]</b></span>
+              <span>VALUES: <b>CAPTURED EMBEDDINGS</b></span>
+              <span>SHAPE: <b className="text-cyan">{pca?.tensor ? JSON.stringify(pca.tensor.shape) : "Unavailable"}</b></span>
             </div>
           </div>
         </div>
@@ -129,10 +130,11 @@ export default function ComponentDetailSection() {
               <div className="tf-stage-pill embed-stage">Input Embedding ({vectorDim}d)</div>
               <div className="tf-connector-down">↓</div>
               <div className="tf-layer-box">
-                <div className="tf-sub-stage">Multi-Head Attn (14Q/2KV GQA)</div>
-                <div className="tf-sub-stage add-norm">Add & RMSNorm</div>
-                <div className="tf-sub-stage mlp-stage">Feed-Forward (SwiGLU 4864d)</div>
-                <div className="tf-sub-stage add-norm">Add & RMSNorm</div>
+                <div className="text-xxs text-dim">Conceptual Decoder Block</div>
+                <div className="tf-sub-stage add-norm">RMSNorm → Q / K / V Projection → RoPE(Q, K)</div>
+                <div className="tf-sub-stage">{model?.num_attention_heads === model?.num_kv_heads ? "Multi-Head Attention" : "Grouped-Query Attention"} · {model?.num_attention_heads ?? "—"} Query Heads / {model?.num_kv_heads ?? "—"} Key Heads / {model?.num_kv_heads ?? "—"} Value Heads</div>
+                <div className="tf-sub-stage add-norm">Output Projection → Residual Add → RMSNorm</div>
+                <div className="tf-sub-stage mlp-stage">{model?.activation_function ?? "—"}-based MLP ({model?.intermediate_size ?? "—"}d) → Residual Add</div>
               </div>
               <div className="tf-connector-down">↓</div>
               <div className="tf-stage-pill out-stage">Hidden Output Vector</div>
@@ -141,14 +143,14 @@ export default function ComponentDetailSection() {
             <div className="layer-progress-container">
               <div className="progress-header flex items-center justify-between text-xxs">
                 <span className="text-dim">
-                  {running ? `Layer ${activeLayerIndex + 1} / ${numLayers}` : `24 Layers Verified`}
+                  {running ? `Layer ${activeLayerIndex + 1} / ${numLayers}` : `${Object.keys(layers).length} / ${numLayers} Layers Captured`}
                 </span>
-                <span className="text-amber font-bold">{running ? `${layerProgressPct}%` : "100%"}</span>
+                <span className="text-amber font-bold">{`${layerProgressPct}%`}</span>
               </div>
               <div className="layer-progress-track">
                 <div
                   className="layer-progress-fill"
-                  style={{ width: `${running ? layerProgressPct : 100}%` }}
+                  style={{ width: `${layerProgressPct}%` }}
                 />
               </div>
             </div>
@@ -174,12 +176,7 @@ export default function ComponentDetailSection() {
                 </thead>
                 <tbody>
                   {generatedTokens.length === 0 ? (
-                    <>
-                      <tr><td className="text-dim">#0</td><td className="text-amber font-bold">Artificial</td><td className="text-dim">28392</td><td className="text-cyan">94.2%</td></tr>
-                      <tr><td className="text-dim">#1</td><td className="text-amber font-bold">intelligence</td><td className="text-dim">10234</td><td className="text-cyan">98.5%</td></tr>
-                      <tr><td className="text-dim">#2</td><td className="text-amber font-bold">is</td><td className="text-dim">374</td><td className="text-cyan">99.1%</td></tr>
-                      <tr><td className="text-dim">#3</td><td className="text-amber font-bold">the</td><td className="text-dim">279</td><td className="text-cyan">96.8%</td></tr>
-                    </>
+                    <tr><td colSpan={4} className="text-dim">No generated tokens</td></tr>
                   ) : (
                     generatedTokens.slice(-4).map((tok) => (
                       <tr key={tok.step}>
@@ -206,8 +203,8 @@ export default function ComponentDetailSection() {
               </div>
             )}
             <div className="panel-footer-stat flex items-center justify-between text-xxs">
-              <span>SAMPLER: <b>top-p 0.9</b></span>
-              <span>EMITTED: <b className="text-amber">{generatedTokens.length || 4}</b></span>
+              <span>SAMPLER: <b>{lastLogits ? `temp ${lastLogits.temperature} · top-p ${lastLogits.top_p}` : "—"}</b></span>
+              <span>EMITTED: <b className="text-amber">{generatedTokens.length}</b></span>
             </div>
           </div>
         </div>
@@ -222,21 +219,14 @@ export default function ComponentDetailSection() {
           </div>
           <div className="panel-body">
             <div className="response-delivery-content">
-              {response ? (
-                <div className="response-text-display">
-                  {response}
-                  {running && <span className="streaming-cursor">▮</span>}
-                </div>
-              ) : (
-                <div className="response-text-display text-bright">
-                  Artificial intelligence (AI) refers to computer systems designed to perform tasks that typically require human cognition, such as perception, reasoning, learning, and language understanding.
-                </div>
-              )}
+              <div className="response-text-display text-bright">
+                {running ? "Generating response · view it in the bottom Output panel" : response ? "Response available in the bottom Output panel" : "Response will appear in the bottom Output panel"}
+              </div>
             </div>
 
             <div className="panel-footer-stat flex items-center justify-between text-xxs">
-              <span>LATENCY: <b className="text-emerald">{summary ? `${((summary.timings?.total_ms as number) / 1000 || 1.12).toFixed(2)}s` : "1.12s"}</b></span>
-              <span>TTFT: <b className="text-cyan">{summary?.timings?.ttft_ms ?? "112"}ms</b></span>
+              <span>LATENCY: <b className="text-emerald">{typeof summary?.timings?.total_ms === "number" ? `${(summary.timings.total_ms / 1000).toFixed(2)}s` : "—"}</b></span>
+              <span>TTFT: <b className="text-cyan">{summary?.timings?.ttft_ms ?? "—"}ms</b></span>
             </div>
           </div>
         </div>

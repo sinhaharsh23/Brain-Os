@@ -23,8 +23,11 @@ def wait_for_model(client, timeout_s=120):
     t0 = time.time()
     while time.time() - t0 < timeout_s:
         r = client.get("/api/health")
-        if r.json().get("model_status") == "loaded":
+        data = r.json()
+        if data.get("model_status") == "loaded":
             return
+        if data.get("model_status") == "error" and str(data.get("model_error_code", "")).startswith("LOCAL_MODEL_"):
+            pytest.skip("Local checkpoint not installed.")
         time.sleep(1)
     raise AssertionError("model did not load in time")
 
@@ -139,6 +142,60 @@ def test_tensor_endpoints_after_inference(client):
     r = client.get(f"/api/sessions/{sid}/events")
     assert r.status_code == 200
     assert len(r.json()) > 0
+
+
+def test_new_introspection_endpoints(client):
+    wait_for_model(client)
+    from app.state import state
+
+    # Test model architecture
+    r = client.get("/api/model/architecture?max_depth=3")
+    assert r.status_code == 200
+    arch = r.json()
+    assert arch["architecture"] == "Qwen2ForCausalLM"
+    assert "tree" in arch
+    assert arch["tree"]["total_params"] > 0
+
+    sid = state.engine.current_session.session_id
+
+    # Test QKV head slicing
+    r = client.get(f"/api/sessions/{sid}/qkv?layer=0&name=q&position=0&head=0")
+    assert r.status_code == 200
+    head_data = r.json()
+    assert head_data["head"] == 0
+    assert head_data["head_dim"] == 64
+    assert len(head_data["values"]) == 64
+
+    # Test Residual Stream
+    r = client.get(f"/api/sessions/{sid}/residual?layer=0&position=0")
+    assert r.status_code == 200
+    res = r.json()
+    assert "metrics" in res
+    assert "input_norm" in res["metrics"]
+    assert "attn_delta_norm" in res["metrics"]
+    assert "all_layers" in res
+    assert len(res["all_layers"]) > 0
+
+    # Test Logit Lens
+    r = client.get(f"/api/sessions/{sid}/logit-lens?step=0&k=5")
+    assert r.status_code == 200
+    ll = r.json()
+    assert "layers" in ll
+    assert len(ll["layers"]) > 0
+
+    # Test KV Cache
+    r = client.get(f"/api/sessions/{sid}/kv-cache?step=0")
+    assert r.status_code == 200
+    kv = r.json()
+    assert "total_bytes" in kv
+    assert kv["total_bytes"] > 0
+
+    # Test Session Compare
+    r = client.get(f"/api/sessions/compare?session_a={sid}&session_b={sid}")
+    assert r.status_code == 200
+    cmp = r.json()
+    assert cmp["token_similarity"] == 1.0
+    assert len(cmp["steps_comparison"]) > 0
 
 
 def test_websocket_controls_are_connection_scoped(client):

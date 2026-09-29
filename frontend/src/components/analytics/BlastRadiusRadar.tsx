@@ -6,6 +6,8 @@ interface AxisInfo {
   headIndex: number
   angleDeg: number
   value: number
+  meanWeight: number | null
+  hasCapture: boolean
 }
 
 export default function BlastRadiusRadar() {
@@ -21,28 +23,26 @@ export default function BlastRadiusRadar() {
   const cy = 110
   const r = 75
 
-  // 6 radial axes representing multi-head attention clusters
+  // The six display groups summarize only the captured top links. The plot
+  // radius is normalized to the strongest captured group; it is not an
+  // attention probability or an invented confidence score.
   const axes = useMemo<AxisInfo[]>(() => {
-    const headWeights = [0, 0, 0, 0, 0, 0]
-    
+    const headWeights: number[][] = Array.from({ length: 6 }, () => [])
     const linkKeys = Object.keys(attentionLinks).map(Number)
     if (linkKeys.length > 0) {
       const allLinks = linkKeys.flatMap((k) => attentionLinks[k] || [])
-      if (allLinks.length > 0) {
-        for (let i = 0; i < 6; i++) {
-          const matching = allLinks.filter((l) => l.head % 6 === i)
-          if (matching.length > 0) {
-            const sum = matching.reduce((acc, l) => acc + (l.weight || 0), 0)
-            const avg = sum / matching.length
-            headWeights[i] = Math.max(0.15, Math.min(1.0, avg * 1.5 + 0.2))
-          }
-        }
+      const headCount = model?.num_attention_heads ?? 0
+      if (headCount > 0) for (const link of allLinks) {
+        const group = Math.min(5, Math.floor(link.head * 6 / headCount))
+        if (Number.isFinite(link.weight)) headWeights[group].push(link.weight)
       }
     }
 
     const headCount = model?.num_attention_heads ?? 0
+    const groupMeans = headWeights.map((weights) => weights.length ? weights.reduce((sum, weight) => sum + weight, 0) / weights.length : null)
+    const maxMean = Math.max(...groupMeans.filter((value): value is number => value != null), 0)
     const labels = Array.from({ length: 6 }, (_, idx) => {
-      if (!headCount) return `H${String(idx).padStart(2, "0")}`
+      if (!headCount) return `GROUP ${idx + 1}`
       const start = Math.floor(idx * headCount / 6)
       const end = Math.max(start, Math.floor((idx + 1) * headCount / 6) - 1)
       return `H${String(start).padStart(2, "0")}-${String(end).padStart(2, "0")}`
@@ -51,9 +51,11 @@ export default function BlastRadiusRadar() {
       const angleDeg = -90 + idx * 60
       return {
         label,
-        headIndex: idx * 2,
+        headIndex: headCount ? Math.floor(idx * headCount / 6) : -1,
         angleDeg,
-        value: headWeights[idx],
+        value: groupMeans[idx] == null || maxMean === 0 ? 0 : groupMeans[idx]! / maxMean,
+        meanWeight: groupMeans[idx],
+        hasCapture: groupMeans[idx] != null,
       }
     })
   }, [attentionLinks, running, currentStep, model])
@@ -68,9 +70,9 @@ export default function BlastRadiusRadar() {
   }).join(" ")
 
   const gridLevels = [0.25, 0.5, 0.75, 1.0]
-  const maxVal = Math.max(...axes.map((a) => a.value))
-  const topAxis = axes.find((a) => a.value === maxVal)
-  const dispersion = (axes.reduce((a, b) => a + Math.abs(b.value - 0.5), 0) / axes.length).toFixed(2)
+  const capturedAxes = axes.filter((axis) => axis.hasCapture)
+  const topAxis = capturedAxes.reduce<AxisInfo | null>((top, axis) => !top || (axis.meanWeight ?? 0) > (top.meanWeight ?? 0) ? axis : top, null)
+  const meanCapturedWeight = capturedAxes.length ? capturedAxes.reduce((sum, axis) => sum + (axis.meanWeight ?? 0), 0) / capturedAxes.length : null
 
   return (
     <div className="telemetry-card blast-radius-card">
@@ -140,15 +142,15 @@ export default function BlastRadiusRadar() {
               )
             })}
 
-            <polygon
+            {capturedAxes.length > 0 && <polygon
               points={dataPoints}
               fill="rgba(0, 210, 255, 0.22)"
               stroke="#00d2ff"
               strokeWidth="1.75"
               className="radar-poly"
-            />
+            />}
 
-            {axes.map((axis) => {
+              {axes.filter((axis) => axis.hasCapture).map((axis) => {
               const rad = (axis.angleDeg * Math.PI) / 180
               const px = cx + r * axis.value * Math.cos(rad)
               const py = cy + r * axis.value * Math.sin(rad)
@@ -164,7 +166,7 @@ export default function BlastRadiusRadar() {
                   stroke="#080c14"
                   strokeWidth="1"
                   className="radar-dot"
-                  onClick={() => selectHead(isSelected ? null : axis.headIndex)}
+                  onClick={() => axis.headIndex >= 0 && selectHead(isSelected ? null : axis.headIndex)}
                   style={{ cursor: "pointer" }}
                 />
               )
@@ -176,16 +178,16 @@ export default function BlastRadiusRadar() {
 
         <div className="radar-stats mono">
           <div className="stat-pill">
-            <span className="stat-pill-label">PEAK HEAD</span>
-            <span className="stat-pill-val text-amber">{topAxis?.label ?? "H04"}</span>
+            <span className="stat-pill-label">STRONGEST CAPTURED GROUP</span>
+            <span className="stat-pill-val text-amber">{topAxis?.label ?? "Unavailable"}</span>
           </div>
           <div className="stat-pill">
-            <span className="stat-pill-label">CONCENTRATION</span>
-            <span className="stat-pill-val text-cyan">{(maxVal * 100).toFixed(0)}%</span>
+            <span className="stat-pill-label">CAPTURED HEAD GROUPS</span>
+            <span className="stat-pill-val text-cyan">{capturedAxes.length} / 6</span>
           </div>
           <div className="stat-pill">
-            <span className="stat-pill-label">DISPERSION</span>
-            <span className="stat-pill-val">{dispersion} σ</span>
+            <span className="stat-pill-label">MEAN CAPTURED LINK WEIGHT</span>
+            <span className="stat-pill-val">{meanCapturedWeight == null ? "Unavailable" : meanCapturedWeight.toFixed(4)}</span>
           </div>
           {!Object.keys(attentionLinks).length && <span className="text-xs text-muted">attention capture unavailable</span>}
         </div>

@@ -6,7 +6,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-os.environ.setdefault("BRAINOS_HF_HOME", os.environ.get("HF_HOME", os.path.join(PROJECT_ROOT, "models", "hf")))
+os.environ.setdefault("HF_HOME", os.path.join(PROJECT_ROOT, "models", "hf"))
 
 
 @pytest.fixture(autouse=True)
@@ -31,8 +31,17 @@ def model_id() -> str:
 @pytest.fixture(scope="session")
 def adapter(model_id):
     from app.models.qwen import QwenAdapter
+    from app.models.resolver import LocalModelNotInstalledError, LocalModelResolver
 
-    a = QwenAdapter(model_id=model_id, device="cpu", dtype="float32")
+    try:
+        resolved = LocalModelResolver(model_id=model_id, offline=True, allow_download=False).resolve_model()
+    except LocalModelNotInstalledError:
+        pytest.skip("Local checkpoint not installed.")
+
+    # An explicitly configured but incomplete checkpoint is a real failure, not
+    # an optional integration test.  Let that exception fail the suite with
+    # the resolver's actionable LOCAL_MODEL_INCOMPLETE message.
+    a = QwenAdapter(model_id=model_id, model_path=str(resolved.path), device="cpu", dtype="float32")
     a.load()
     yield a
     a.unload()

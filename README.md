@@ -20,11 +20,11 @@ BrainOS is a local Transformer observatory. It runs `Qwen/Qwen2.5-0.5B-Instruct`
 - Server-side external observation adapters for OpenAI, Anthropic, and Gemini when credentials are configured
 - Optional bearer/token authentication, rate limiting, strict configurable CORS, and per-connection WebSocket isolation
 
-BrainOS does not expose or claim to expose private chain-of-thought. It visualizes inspectable model tensors and labels derived educational interpretations accordingly.
+BrainOS reports observable model telemetry only. It does not expose private chain-of-thought or infer hidden reasoning text.
 
 ## Hardware
 
-The default model is approximately 494M parameters and is selected for the current Apple M5 Pro unified-memory environment. Apple MPS is selected automatically when available, with CPU fallback. NVIDIA CUDA and AMD ROCm remain additional compatibility targets. Larger Qwen2.5 models are listed in the model explorer but should only be loaded when the machine has enough RAM or VRAM.
+The default checkpoint is `Qwen/Qwen2.5-0.5B-Instruct`. Parameter count, architecture, context, runtime dtype, and device are read from the loaded model. Apple MPS is selected when available, with CPU fallback. NVIDIA CUDA and AMD ROCm remain additional compatibility targets.
 
 ## Quick Start
 
@@ -40,6 +40,14 @@ cd ../backend && HF_HOME=../models/hf .venv/bin/python run.py
 Open `http://127.0.0.1:8765`. The first run may download the model from Hugging Face.
 
 For frontend development, run the backend on port `8765`, then run `npm run dev` in `frontend` and open the Vite URL.
+
+## Providers
+
+**Hugging Face Local** loads the native Qwen checkpoint and tokenizer. BrainOS can report the applied chat template, input token IDs, real embeddings, PyTorch forward-hook captures, logits, probabilities, and KV-cache tensors when the corresponding capture path ran.
+
+**Ollama** sends requests to the local Ollama API for the selected installed model. Prompt and generated token counts, prompt-cache counts, and evaluation timings come from Ollama's final response metrics. BrainOS measures TTFT from request submission to the first non-empty streamed content. Model metadata is shown only when returned by Ollama. Its normal API does not expose PyTorch forward hooks or direct transformer tensors, so Q/K/V, attention, hidden states, embeddings, MLP activations, logits, and tensor KV cache are unavailable. Token IDs for Ollama's internally rendered prompt are unavailable unless its API exposes them.
+
+Set `OLLAMA_URL` and `OLLAMA_MODELS` (comma-separated model names installed in Ollama); the default URL is `http://127.0.0.1:11434`. Ollama is the runtime provider, while the selected tag (for example, `llama3.2:3b`) is the model identity. Its sampling options are the options BrainOS sends with the request.
 
 For a protected deployment, set `BRAINOS_AUTH_TOKEN` on the backend and the matching `VITE_BRAINOS_TOKEN` when building the frontend. HTTP API calls use `X-BrainOS-Token`; WebSocket connections use the token query parameter. Session inference and replay events are routed only to the owning WebSocket connection.
 
@@ -72,10 +80,16 @@ Browser tests require the local backend to be running at `http://127.0.0.1:8765`
 - `backend/app/instrumentation`: hooks and tensor statistics
 - `backend/app/events`: real-time event types and event bus
 - `backend/app/api`: REST inspection endpoints
-- `frontend/src/brain3d`: React Three Fiber visualization
-- `frontend/src/components`: inspectors, controls, monitoring, probability, and replay UI
-- `frontend/src/views`: architecture, attention, embedding, token, and developer views
+- `frontend/src/observatory`: the active React Three Fiber observatory, inspectors, controls, monitoring, probability, and replay UI
+- `frontend/src/store`: canonical session/step/token/layer/head/module inspection state
+- `frontend/src/api`: REST and WebSocket clients for real runtime data
 
 Live sessions report time-to-first-token, generation speed, context usage, and total generation time. Replay controls operate on recorded event indices; they do not fabricate intermediate model states.
 
 See `DEVELOPMENT.md`, `MODEL_GUIDE.md`, `docs/API.md`, and `TROUBLESHOOTING.md` for details.
+
+## BrainOS 3.0 observability notes
+
+The dashboard is driven by the actual local model runtime. Before a backend run, tensor and telemetry panels remain empty or show `unavailable`; the frontend does not fall back to synthetic tokens, attention, activations, logits, or system metrics. External provider sessions are response/metadata-only by design.
+
+Architecture and completion details are documented in [docs/BRAINOS_ARCHITECTURE.md](docs/BRAINOS_ARCHITECTURE.md) and [docs/BRAINOS_3_COMPLETION_REPORT.md](docs/BRAINOS_3_COMPLETION_REPORT.md). The full implementation specification is retained in [docs/BRAINOS_3_MASTER_PLAN.md](docs/BRAINOS_3_MASTER_PLAN.md).

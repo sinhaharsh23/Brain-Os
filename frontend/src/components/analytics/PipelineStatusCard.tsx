@@ -15,53 +15,58 @@ export default function PipelineStatusCard() {
   const currentStep = useBrain((s) => s.currentStep)
   const tokens = useBrain((s) => s.tokens)
   const generatedTokens = useBrain((s) => s.generatedTokens)
+  const inspectionMode = useBrain((s) => s.inspectionMode)
+  const provider = useBrain((s) => s.provider)
+  const telemetry = useBrain((s) => s.telemetry)
+  const limited = inspectionMode === "limited"
 
   const stages: PipelineStage[] = [
     {
       id: "tok",
-      name: "TOKENIZER",
-      detail: `${tokens.length} prompt tok`,
-      subtext: model ? `${model.vocab_size.toLocaleString()} vocabulary entries` : "metadata unavailable",
+      name: limited ? "PROMPT EVALUATION" : "TOKENIZER",
+      detail: limited ? telemetry?.tokens.model_input_tokens == null ? "Unavailable" : `${telemetry.tokens.model_input_tokens} runtime input tokens` : `${tokens.length} model input tokens`,
+      subtext: limited ? "count from provider final metrics" : model ? `${model.vocab_size.toLocaleString()} vocabulary entries` : "metadata unavailable",
       activeWhen: "always",
     },
     {
       id: "embed",
-      name: "EMBED & ROPE",
-      detail: model ? `${model.hidden_size}d vector` : "—",
-      subtext: model ? "rotary position embeddings" : "metadata unavailable",
+      name: limited ? "EMBEDDING TENSORS" : "EMBED & ROPE",
+      detail: limited ? "Unavailable through provider" : model ? `${model.hidden_size}d vector` : "Unavailable",
+      subtext: limited ? "internal tensors are not exposed" : model ? "rotary position embeddings" : "metadata unavailable",
       activeWhen: "always",
     },
     {
       id: "attn",
-      name: "GQA ATTENTION",
-      detail: model ? `${model.num_attention_heads}Q / ${model.num_kv_heads}KV` : "—",
-      subtext: model ? "attention capture" : "metadata unavailable",
+      name: limited ? "ATTENTION / QKV" : "GQA ATTENTION",
+      detail: limited ? "Unavailable through provider" : model ? `${model.num_attention_heads} Query / ${model.num_kv_heads} Key / ${model.num_kv_heads} Value heads` : "Unavailable",
+      subtext: limited ? "deep tensor inspection requires native mode" : model ? "captured only when a real hook ran" : "metadata unavailable",
       activeWhen: "inferencing",
     },
     {
       id: "mlp",
-      name: "SWIGLU MLP",
-      detail: model ? `${model.intermediate_size} intermediate` : "—",
-      subtext: model ? `${model.num_layers}-layer feedforward` : "metadata unavailable",
+      name: limited ? "MLP ACTIVATIONS" : "SWIGLU MLP",
+      detail: limited ? "Unavailable through provider" : model ? `${model.intermediate_size} intermediate` : "Unavailable",
+      subtext: limited ? "internal tensors are not exposed" : model ? `${model.num_layers} layers · hook capture only` : "metadata unavailable",
       activeWhen: "inferencing",
     },
     {
       id: "logits",
-      name: "LM HEAD LOGITS",
-      detail: "Top-k/p sampler",
-      subtext: "Softmax temperature",
+      name: limited ? "TOKEN LOGPROBS" : "LM HEAD LOGITS",
+      detail: limited ? telemetry?.capabilities.logprobs ? "Returned by provider" : "Unavailable through provider" : "Captured from model logits",
+      subtext: limited ? "probability shown only when returned" : "active sampler options",
       activeWhen: "logits",
     },
     {
       id: "stream",
-      name: "STREAM DISPATCH",
-      detail: `${generatedTokens.length} gen tok`,
-      subtext: "Async WebSocket SSE",
+      name: limited ? "RESPONSE STREAM" : "STREAM DISPATCH",
+      detail: limited ? "Provider chunks" : `${generatedTokens.length} generated model tokens`,
+      subtext: limited ? "token count finalized by runtime" : "WebSocket stream",
       activeWhen: "always",
     },
   ]
 
   const getStageStatus = (stage: PipelineStage) => {
+    if (limited && ["embed", "attn", "mlp", "logits"].includes(stage.id)) return { text: "UNAVAILABLE", color: "idle" }
     if (!running) return { text: "IDLE", color: "idle" }
     if (stage.activeWhen === "logits" && currentStep > 0) return { text: "ACTIVE", color: "active" }
     if (stage.activeWhen === "inferencing") return { text: "COMPUTING", color: "computing" }
@@ -78,7 +83,7 @@ export default function PipelineStatusCard() {
           </span>
         </div>
         <span className="text-xs text-muted mono">
-          {model?.architecture ?? "architecture unavailable"}
+          {limited ? `${provider ?? "provider"} runtime · limited inspection` : model?.architecture ?? "architecture unavailable"}
         </span>
       </div>
 

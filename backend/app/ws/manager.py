@@ -59,11 +59,25 @@ class ConnectionManager:
         payload = event.to_dict()
         has_session_owner = bool(event.session_id and event.session_id in self._session_connections)
         owner = self._session_connections.get(event.session_id) if has_session_owner else None
+        event_connection_id = payload.get("data", {}).get("connection_id") if isinstance(payload.get("data"), dict) else None
+        connection_owner = next((ws for ws, connection_id in self._connection_ids.items() if connection_id == event_connection_id), None) if event_connection_id else None
         # A bound owner is normally an accepted WebSocket. Test/replay
         # controllers may bind a lightweight owner that is not transport-backed;
         # do not treat that as a dead socket and erase the ownership lock while
         # dispatching its event.
-        recipients = [owner] if has_session_owner and owner in self._connections else ([] if has_session_owner else list(self._connections))
+        if has_session_owner:
+            recipients = [owner] if owner in self._connections else []
+        elif connection_owner is not None:
+            # The scheduler emits its queued event before the session binding
+            # callback runs. Route that first event by connection id so a
+            # second browser session cannot inherit another session's run.
+            recipients = [connection_owner]
+        elif event.session_id:
+            # Session-scoped events without an owner must not become a global
+            # broadcast. Unscoped events (monitoring/system) still fan out.
+            recipients = []
+        else:
+            recipients = list(self._connections)
         dead: list[WebSocket] = []
         for ws in recipients:
             if ws is None:

@@ -43,8 +43,13 @@ def topk_activations(t: torch.Tensor, k: int = 16) -> list[dict[str, Any]]:
     vals, idx = flat.topk(k)
     vals = vals.tolist()
     idx = idx.tolist()
-    rank_of = {int(v): int(i) for i, v in enumerate(sorted(idx, reverse=True))}
-    return [{"index": int(i), "value": float(v), "rank": rank_of.get(int(i))} for i, v in zip(idx, vals)]
+    return [{"index": int(i), "value": float(v), "rank": int(rank)} for rank, (i, v) in enumerate(zip(idx, vals))]
+
+
+def entropy_from_probabilities(probabilities: torch.Tensor) -> float:
+    """Return Shannon entropy for an already normalized probability vector."""
+    p = probabilities.detach().to(torch.float32)
+    return float(-(p.clamp_min(1e-12) * p.clamp_min(1e-12).log()).sum())
 
 
 def sample_activations(t: torch.Tensor, limit: int = 128) -> list[dict[str, Any]]:
@@ -58,6 +63,56 @@ def sample_activations(t: torch.Tensor, limit: int = 128) -> list[dict[str, Any]
         idx = idx.to(torch.long)
     vals = t.view(-1)[idx]
     return [{"index": int(i), "value": float(v)} for i, v in zip(idx.tolist(), vals.tolist())]
+
+
+def cosine_sim(a: torch.Tensor, b: torch.Tensor) -> float:
+    a = a.detach().to(torch.float32).view(-1)
+    b = b.detach().to(torch.float32).view(-1)
+    norm_a = float(a.norm())
+    norm_b = float(b.norm())
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return float(torch.dot(a, b) / (norm_a * norm_b))
+
+
+def residual_metrics(x0: torch.Tensor, attn_out: torch.Tensor, mlp_out: torch.Tensor, x2: torch.Tensor) -> dict[str, Any]:
+    x0_f = x0.detach().to(torch.float32).view(-1)
+    attn_f = attn_out.detach().to(torch.float32).view(-1)
+    mlp_f = mlp_out.detach().to(torch.float32).view(-1)
+    x2_f = x2.detach().to(torch.float32).view(-1)
+    post_attn = x0_f + attn_f
+
+    norm_x0 = float(x0_f.norm())
+    norm_attn = float(attn_f.norm())
+    norm_post_attn = float(post_attn.norm())
+    norm_mlp = float(mlp_f.norm())
+    norm_x2 = float(x2_f.norm())
+
+    total_delta = norm_attn + norm_mlp + 1e-9
+    attn_ratio = float(norm_attn / total_delta)
+    mlp_ratio = float(norm_mlp / total_delta)
+
+    return {
+        "input_norm": norm_x0,
+        "attn_delta_norm": norm_attn,
+        "post_attn_norm": norm_post_attn,
+        "mlp_delta_norm": norm_mlp,
+        "output_norm": norm_x2,
+        "cosine_similarity": cosine_sim(x0_f, x2_f),
+        "attn_ratio": round(attn_ratio, 4),
+        "mlp_ratio": round(mlp_ratio, 4),
+    }
+
+
+def qkv_head_slice(tensor: torch.Tensor, head: int, head_dim: int, num_heads: int) -> torch.Tensor:
+    t = tensor.detach().to(torch.float32)
+    flat = t.view(-1)
+    head_idx = max(0, min(head, num_heads - 1))
+    start = head_idx * head_dim
+    end = start + head_dim
+    if end <= flat.numel():
+        return flat[start:end]
+    return flat
 
 
 def pca_projection(embeddings: np.ndarray, dims: int = 3) -> dict[str, Any]:
@@ -75,7 +130,11 @@ def pca_projection(embeddings: np.ndarray, dims: int = 3) -> dict[str, Any]:
         components = vt[:dims].T
     else:
         n_components = min(dims, n - 1, embeddings.shape[1])
-        pca = PCA(n_components=n_components)
+        # The sklearn randomized solver emits overflow/NaN warnings for the
+        # small, highly rectangular token batches produced by this model even
+        # when the embeddings themselves are finite. Full SVD is stable for
+        # these observability-sized batches and preserves the real projection.
+        pca = PCA(n_components=n_components, svd_solver="full")
         coords_full = pca.fit_transform(embeddings)
         coords = np.zeros((n, dims), dtype=np.float64)
         coords[:, :n_components] = coords_full
@@ -132,7 +191,7 @@ def quantile_scale(values: list[float], q: float = 0.98) -> float:
     return float(m) if m > 1e-6 else 1.0
 
 
-def human_bytes(n: int) -> str:
+def human_bytes(n: int | float) -> str:
     for unit in ("B", "KB", "MB", "GB", "TB"):
         if abs(n) < 1024:
             return f"{n:.1f}{unit}"

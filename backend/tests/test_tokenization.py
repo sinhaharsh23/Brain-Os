@@ -21,8 +21,9 @@ def test_tokenizer_no_chat_template(adapter):
 
 
 def test_tokenizer_max_tokens(adapter):
-    tokens, _, _ = adapter.tokenize("hello world " * 50, max_tokens=10)
-    assert len(tokens) == 10
+    import pytest
+    with pytest.raises(ValueError, match="Model input has .* tokens; limit is 10"):
+        adapter.tokenize("hello world " * 50, max_tokens=10)
 
 
 def test_decode_roundtrip(adapter):

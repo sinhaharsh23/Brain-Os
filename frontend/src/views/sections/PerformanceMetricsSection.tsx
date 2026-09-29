@@ -1,25 +1,29 @@
+import TelemetryDetails from "../../components/TelemetryDetails"
 import { useBrain } from "../../store/useBrainStore"
 
 export default function PerformanceMetricsSection() {
+  const telemetry = useBrain((s) => s.telemetry)
+  const providerLogprobs = useBrain((s) => s.providerLogprobs)
   const model = useBrain((s) => s.model)
   const summary = useBrain((s) => s.summary)
   const monitoring = useBrain((s) => s.monitoring)
   const hardware = useBrain((s) => s.hardware)
   const tokens = useBrain((s) => s.tokens)
   const generatedTokens = useBrain((s) => s.generatedTokens)
-  const candidates = useBrain((s) => s.candidates)
   const modelStatus = useBrain((s) => s.modelStatus)
 
-  const totalTokens = tokens.length + generatedTokens.length
-  const maxTokens = model?.context_length
+  const inspectionMode = useBrain((s) => s.inspectionMode)
+  const totalTokens = telemetry?.tokens.sequence_tokens ?? (inspectionMode === "limited" ? null : tokens.length + generatedTokens.length)
+  const maxTokens = telemetry?.model.context_window ?? (inspectionMode === "limited" ? null : model?.context_length)
   const responseTimeSec = typeof summary?.timings?.total_ms === "number"
     ? (summary.timings.total_ms / 1000).toFixed(2)
     : "—"
   const throughputTps = typeof summary?.timings?.tokens_per_second === "number"
     ? summary.timings.tokens_per_second.toFixed(1)
     : "—"
-  const topConfidence = candidates?.[0]?.probability != null
-    ? (candidates[0].probability * 100).toFixed(1)
+  const selectedProbability = providerLogprobs.length ? Math.exp(providerLogprobs[providerLogprobs.length - 1].logprob) : generatedTokens.at(-1)?.probability
+  const topConfidence = selectedProbability != null
+    ? (selectedProbability * 100).toFixed(1)
     : "—"
   const ramUsed = monitoring?.ram_used_gb ?? hardware?.ram?.used_gb ?? null
   const ramTotal = monitoring?.ram_total_gb ?? hardware?.ram?.total_gb ?? null
@@ -31,7 +35,7 @@ export default function PerformanceMetricsSection() {
     const max = Math.max(...values, min + 1)
     const pts = values
       .map((v, i) => {
-        const x = (i / (values.length - 1)) * 44
+        const x = (i / Math.max(1, values.length - 1)) * 44
         const y = 15 - ((v - min) / (max - min)) * 11
         return `${x.toFixed(1)},${y.toFixed(1)}`
       })
@@ -49,7 +53,7 @@ export default function PerformanceMetricsSection() {
       <div className="metrics-left-column">
         <div className="section-header-wrap flex items-center justify-between">
           <span className="section-title-tag">SYSTEM PERFORMANCE METRICS</span>
-          <span className="text-xxs text-dim">MPS HARDWARE SENSORS</span>
+          <span className="text-xxs text-dim">SYSTEM TELEMETRY</span>
         </div>
 
         <div className="metrics-cards-grid">
@@ -70,11 +74,11 @@ export default function PerformanceMetricsSection() {
           <div className="metric-stat-card">
             <div className="metric-card-top flex items-center justify-between">
               <span className="metric-name">TOKENS PROCESSED</span>
-              {renderSparkline(totalTokens ? [totalTokens] : [], "#ffb648")}
+          {renderSparkline(totalTokens ? [totalTokens] : [], "#ffb648")}
             </div>
             <div className="metric-main-val">
-              <span className="text-amber">{totalTokens}</span>
-              <span className="metric-unit">{maxTokens ? `/ ${maxTokens}` : "TOKENS"}</span>
+              <span className="text-amber">{totalTokens ?? "—"}</span>
+              <span className="metric-unit">{maxTokens ? `/ ${maxTokens}` : totalTokens == null ? "UNAVAILABLE" : "TOKENS"}</span>
             </div>
             <span className="metric-sub text-xxs text-dim">Sequence tokens</span>
           </div>
@@ -82,33 +86,33 @@ export default function PerformanceMetricsSection() {
           {/* Card 3: Throughput */}
           <div className="metric-stat-card">
             <div className="metric-card-top flex items-center justify-between">
-              <span className="metric-name">THROUGHPUT</span>
+              <span className="metric-name">END-TO-END TOKEN RATE</span>
               {renderSparkline(throughputTps === "—" ? [] : [Number(throughputTps)], "#22c55e")}
             </div>
             <div className="metric-main-val">
               <span className="text-emerald">{throughputTps}</span>
-              <span className="metric-unit">TOK/S</span>
+              <span className="metric-unit">E2E TOK/S</span>
             </div>
-            <span className="metric-sub text-xxs text-dim">Metal FP16</span>
+            <span className="metric-sub text-xxs text-dim">{model?.dtype ?? "—"}</span>
           </div>
 
           {/* Card 4: Top Confidence */}
           <div className="metric-stat-card">
             <div className="metric-card-top flex items-center justify-between">
-              <span className="metric-name">SAMPLING CONFIDENCE</span>
+              <span className="metric-name">SELECTED TOKEN PROBABILITY</span>
               {renderSparkline(topConfidence === "—" ? [] : [Number(topConfidence)], "#00d2ff")}
             </div>
             <div className="metric-main-val">
-              <span className="text-cyan">{topConfidence}%</span>
+              <span className="text-cyan">{selectedProbability == null ? "—" : `${topConfidence}%`}</span>
               <span className="metric-unit">PROB</span>
             </div>
-            <span className="metric-sub text-xxs text-dim">Top-1 Logit Prob</span>
+            <span className="metric-sub text-xxs text-dim">Probability of the selected token</span>
           </div>
 
           {/* Card 5: GPU Memory */}
           <div className="metric-stat-card">
             <div className="metric-card-top flex items-center justify-between">
-              <span className="metric-name">GPU MEMORY (UNIFIED)</span>
+              <span className="metric-name">SYSTEM UNIFIED MEMORY</span>
               {renderSparkline(ramUsed == null ? [] : [ramUsed], "#a855f7")}
             </div>
             <div className="metric-main-val">
@@ -121,14 +125,14 @@ export default function PerformanceMetricsSection() {
           {/* Card 6: Overall System Load */}
           <div className="metric-stat-card">
             <div className="metric-card-top flex items-center justify-between">
-              <span className="metric-name">SYSTEM LOAD</span>
+              <span className="metric-name">SYSTEM CPU UTILIZATION</span>
               {renderSparkline(cpuPercent == null ? [] : [cpuPercent], "#ffb648")}
             </div>
             <div className="metric-main-val">
               <span className="text-bright">{cpuPercent == null ? "—" : `${cpuPercent.toFixed(0)}%`}</span>
               <span className="metric-unit">UTIL</span>
             </div>
-            <span className="metric-sub text-xxs text-dim">{hardware?.backend ?? "accelerator unavailable"}</span>
+            <span className="metric-sub text-xxs text-dim">psutil system CPU</span>
           </div>
         </div>
       </div>
@@ -148,6 +152,7 @@ export default function PerformanceMetricsSection() {
             <span className="status-badge-pill badge-emerald">Active & Ready</span>
           </div>
 
+          <details><summary>PROVIDER / TOKEN COUNTS / TIMING SOURCES</summary><TelemetryDetails /></details>
           <div className="model-specs-table">
             <div className="spec-row flex items-center justify-between">
               <span className="text-dim">PARAMETERS:</span>
@@ -167,7 +172,7 @@ export default function PerformanceMetricsSection() {
             </div>
             <div className="spec-row flex items-center justify-between">
               <span className="text-dim">ACCELERATOR:</span>
-              <span className="text-emerald">{hardware?.backend ?? "—"}</span>
+              <span className="text-emerald">{model?.device ?? "Unavailable"}</span>
             </div>
             <div className="spec-row flex items-center justify-between">
               <span className="text-dim">STATUS:</span>

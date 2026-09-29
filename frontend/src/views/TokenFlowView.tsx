@@ -1,3 +1,4 @@
+import TelemetryDetails from "../components/TelemetryDetails"
 import { useBrain } from "../store/useBrainStore"
 import ExternalObservationNotice from "../components/ExternalObservationNotice"
 
@@ -15,6 +16,8 @@ export default function TokenFlowView() {
 
   return (
     <div style={{ padding: 12, overflowY: "auto", height: "100%" }}>
+      <TelemetryDetails />
+      <p className="muted">Prefill processes the chat-formatted input to initialize model state. Each autoregressive decode step traverses the transformer stack again, until a stop token or the output limit.</p>
       <div className="panel-title" style={{ marginTop: 0 }}>
         Tokenization — real tokenizer output ({tokens.length} tokens{pca ? ` · ${pca.pca_method} embedding points ready` : ""})
       </div>

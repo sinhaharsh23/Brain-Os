@@ -9,6 +9,7 @@ const FALLBACK_PROVIDERS: ProviderDescriptor[] = [
   { provider_id: "openai", display_name: "OpenAI / ChatGPT", kind: "external", inspection_mode: "limited", availability: "unknown", limitation: "", capabilities: {}, models: ["gpt-4o-mini"] },
   { provider_id: "anthropic", display_name: "Anthropic / Claude", kind: "external", inspection_mode: "limited", availability: "unknown", limitation: "", capabilities: {}, models: ["claude-3-5-haiku-latest"] },
   { provider_id: "google", display_name: "Google Gemini", kind: "external", inspection_mode: "limited", availability: "unknown", limitation: "", capabilities: {}, models: ["gemini-2.0-flash"] },
+  { provider_id: "ollama", display_name: "Ollama", kind: "local", inspection_mode: "limited", availability: "unknown", limitation: "", capabilities: {}, models: ["llama3.2"] },
 ]
 
 const optionLabels: Record<string, string> = {
@@ -16,6 +17,7 @@ const optionLabels: Record<string, string> = {
   openai: "OpenAI · LIMITED",
   anthropic: "Claude · LIMITED",
   google: "Gemini · LIMITED",
+  ollama: "Ollama · RUNTIME",
 }
 
 export default function PromptBar() {
@@ -24,29 +26,77 @@ export default function PromptBar() {
   const paused = useBrain((s) => s.paused)
   const connected = useBrain((s) => s.connected)
   const modelStatus = useBrain((s) => s.modelStatus)
+  const loadedModel = useBrain((s) => s.model)
   const runStatus = useBrain((s) => s.runStatus)
   const runId = useBrain((s) => s.runId)
   const queuePosition = useBrain((s) => s.queuePosition)
-  const [maxNew, setMaxNew] = useState(64)
+  const [maxNew, setMaxNew] = useState(800)
   const [temperature, setTemperature] = useState(0.7)
   const [topP, setTopP] = useState(0.9)
   const [topK, setTopK] = useState(40)
-  const [provider, setProvider] = useState("qwen-local")
-  const [providerModel, setProviderModel] = useState("")
+  const provider = useBrain((s) => s.provider) ?? "qwen-local"
+  const providerModel = useBrain((s) => s.providerModel) ?? ""
+  const setProviderModel = (value: string) => useBrain.getState().set({ providerModel: value })
+  const [localModelId, setLocalModelId] = useState("")
   const [providers, setProviders] = useState<ProviderDescriptor[]>(FALLBACK_PROVIDERS)
 
   useEffect(() => {
-    api.providers().then(setProviders).catch(() => {})
+    let ollamaSnapshot: { models: string[]; status: string } | null = null
+    api.providers().then((result) => setProviders(result.map((item) => item.provider_id !== "ollama" || !ollamaSnapshot
+      ? item
+      : { ...item, models: ollamaSnapshot.models, availability: ollamaSnapshot.status, available: ollamaSnapshot.status === "READY", connection_status: ollamaSnapshot.status === "READY" ? "available" : "unavailable" }))).catch(() => {})
+    api.model().then((model) => { setLocalModelId(model.model_id); useBrain.getState().set({ nativeModel: model }) }).catch(() => {})
+    api.ollamaModels().then(({ models, status }) => {
+      ollamaSnapshot = { models, status }
+      setProviders((items) => items.map((item) => item.provider_id === "ollama"
+        ? { ...item, models, availability: status, available: status === "READY", connection_status: status === "READY" ? "available" : "unavailable" }
+        : item))
+    }).catch(() => {
+      ollamaSnapshot = { models: [], status: "OFFLINE" }
+      setProviders((items) => items.map((item) => item.provider_id === "ollama"
+        ? { ...item, models: [], availability: "OFFLINE", available: false, connection_status: "network_unavailable" }
+        : item))
+    })
   }, [])
+
+  useEffect(() => {
+    if (provider === "qwen-local" && loadedModel?.model_id && providers.find((item) => item.provider_id === "qwen-local")?.models.includes(loadedModel.model_id)) {
+      setLocalModelId(loadedModel.model_id)
+      setProviderModel(loadedModel.model_id)
+    }
+  }, [provider, loadedModel?.model_id, providers])
 
   const providerInfo = providers.find((item) => item.provider_id === provider)
 
   const changeProvider = (value: string) => {
-    setProvider(value)
-    setProviderModel(providers.find((item) => item.provider_id === value)?.models[0] ?? "")
+    const nextProvider = providers.find((item) => item.provider_id === value)
+    const nextModel = value === "qwen-local" ? (localModelId || nextProvider?.models[0] || "") : (nextProvider?.models[0] ?? "")
+    send("replay_stop")
+    useBrain.getState().switchProvider(value, nextModel)
   }
 
-  const canRun = connected && !running && (provider !== "qwen-local" || modelStatus === "loaded")
+  const changeModel = (value: string) => {
+    useBrain.getState().switchProvider(provider, value)
+    if (provider !== "qwen-local" || value === localModelId) return
+    useBrain.getState().set({ modelStatus: "loading", inferenceError: null, providerModel: value })
+    api.loadModel(value).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : "local model load failed"
+      useBrain.getState().set({ modelStatus: "error", inferenceError: message })
+    })
+  }
+
+  useEffect(() => {
+    if (provider !== "ollama" || !providerModel) return
+    let cancelled = false
+    api.providerModelInfo(provider, providerModel).then((telemetry) => {
+      if (!cancelled && useBrain.getState().provider === provider && useBrain.getState().providerModel === providerModel) useBrain.getState().set({ telemetry, modelStatus: telemetry.model.status === "READY" ? "loaded" : "error", inferenceError: telemetry.model.status === "READY" ? null : String(telemetry.model.status) })
+    }).catch((error) => { if (!cancelled) useBrain.getState().set({ inferenceError: String(error), modelStatus: "error" }) })
+    return () => { cancelled = true }
+  }, [provider, providerModel])
+
+  const modelOptions = providerInfo?.models ?? []
+
+  const canRun = connected && !running && (provider !== "qwen-local" || modelStatus === "loaded") && (provider !== "ollama" || (providerInfo?.available === true && Boolean(providerModel)))
 
   const run = () => {
     const text = prompt.trim()
@@ -83,17 +133,19 @@ export default function PromptBar() {
         disabled={running}
       />
       <div className="prompt-params">
-        <select value={provider} onChange={(e) => changeProvider(e.target.value)} disabled={running} title="Provider capability mode">
+        <span className="prompt-control-label">Provider</span>
+        <select value={provider} onChange={(e) => changeProvider(e.target.value)} disabled={running} title="Provider capability mode" aria-label="Provider">
           {providers.map((item) => <option key={item.provider_id} value={item.provider_id}>{optionLabels[item.provider_id] ?? `${item.display_name} · ${item.inspection_mode === "deep" ? "DEEP" : "LIMITED"}`}</option>)}
         </select>
-        {provider !== "qwen-local" && providerInfo?.models.length ? (
-          <select value={providerModel || providerInfo.models[0]} onChange={(e) => setProviderModel(e.target.value)} disabled={running} title="Provider model">
-            {providerInfo.models.map((item) => <option key={item} value={item}>{item}</option>)}
+        {modelOptions.length > 0 && <>
+          <span className="prompt-control-label">Model</span>
+          <select className="model-select" value={providerModel || modelOptions[0]} onChange={(e) => changeModel(e.target.value)} disabled={running || (provider === "qwen-local" && modelStatus === "loading")} title="Select the model used for the next request" aria-label="Model">
+            {modelOptions.map((item) => <option key={item} value={item}>{item.split("/").pop() ?? item}</option>)}
           </select>
-        ) : null}
+        </>}
         {providerInfo && <span className={providerInfo.inspection_mode === "deep" ? "ok" : "warn"}>{providerInfo.inspection_mode === "deep" ? "Deep Inspection" : `External Observation · ${providerInfo.availability}`}</span>}
-        <span>tokens</span>
-        <input type="number" min={1} max={512} value={maxNew} onChange={(e) => setMaxNew(Number(e.target.value))} disabled={running} />
+        <span title={provider === "ollama" ? "Maximum output mapped to Ollama options.num_predict for this request. This is separate from the model context window." : "Maximum output mapped to Hugging Face max_new_tokens. This is separate from the model context window."}>Max Output Tokens</span>
+        <input type="number" min={1} max={1200} value={maxNew} onChange={(e) => setMaxNew(Math.min(1200, Math.max(1, Number(e.target.value))))} disabled={running} aria-label="Max Output Tokens" />
         <span>temp</span>
         <input type="number" min={0} max={2} step={0.1} value={temperature} onChange={(e) => setTemperature(Number(e.target.value))} disabled={running} />
         <span>top-p</span>

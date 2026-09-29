@@ -99,10 +99,9 @@ export default function DashboardView() {
             </div>
           )}
 
-          {subMode === "3d-scene" ? (
-            <div className="dashboard-neural-stage">
+          <div className="dashboard-neural-stage" style={{ display: subMode === "3d-scene" ? undefined : "none" }}>
               <div className="stage-corner stage-corner-tl mono">FIELD / 3D · DEPTH ENABLED</div>
-              <div className="stage-corner stage-corner-tr mono">{tokens.length + generatedTokens.length} CONTEXT NODES</div>
+              <div className="stage-corner stage-corner-tr mono">{inspectionMode === "limited" ? "PROVIDER STREAM · INTERNAL NODES UNAVAILABLE" : `${tokens.length + generatedTokens.length} SEQUENCE TOKENS`}</div>
               <BrainScene />
               <div className="neural-stage-overlay mono">
                 <div className="stage-readout">
@@ -113,19 +112,13 @@ export default function DashboardView() {
                   <span className="readout-label">STEP</span>
                   <strong>{running || currentStep > 0 ? String(currentStep).padStart(3, "0") : "—"}</strong>
                 </div>
-                <div className="stage-readout stage-token-readout">
-                  <span className="readout-label">LATEST TOKEN</span>
-                  <strong>{latestToken ? `${latestToken.text || "∅"} · ${(latestToken.probability * 100).toFixed(1)}%` : "awaiting token event"}</strong>
-                </div>
               </div>
-            </div>
-          ) : (
-            <NeuralGraphHero />
-          )}
+          </div>
+          {subMode === "neural-deck" && <NeuralGraphHero />}
 
           <div className="dashboard-hero-footer mono">
             <span><i className={running ? "signal-live" : "signal-idle"} /> {connected ? "WS LINK" : "WS DISCONNECTED"}</span>
-            <span>{inspectionMode === "limited" ? "private tensors unavailable" : `${tokens.length} prompt · ${generatedTokens.length} generated`}</span>
+            <span>{inspectionMode === "limited" ? "provider runtime telemetry · internal tensors unavailable" : `${tokens.length} model input · ${generatedTokens.length} generated`}</span>
             <span>{tps ? `${tps} tok/s` : latestToken ? `${latestToken.time_ms} ms/token` : "throughput —"}</span>
           </div>
         </section>
@@ -159,10 +152,10 @@ export default function DashboardView() {
           }}
         >
           {modelStatus === "loading"
-            ? "Loading Qwen2.5-0.5B-Instruct on Apple Silicon MPS…"
+            ? `Loading ${model?.model_id ?? "native model"}…`
             : modelStatus === "error"
             ? `Model failed to load: ${inferenceError ?? "unknown error"}`
-            : "Waiting for model…"}
+            : inspectionMode === "limited" ? "Waiting for provider runtime…" : "Waiting for model…"}
         </div>
       )}
     </div>

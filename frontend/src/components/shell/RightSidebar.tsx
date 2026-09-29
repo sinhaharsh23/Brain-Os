@@ -3,6 +3,9 @@ import { useBrain } from "../../store/useBrainStore"
 import { send } from "../../ws/client"
 
 export default function RightSidebar() {
+  const telemetry = useBrain((s) => s.telemetry)
+  const providerModel = useBrain((s) => s.providerModel)
+  const inspectionMode = useBrain((s) => s.inspectionMode)
   const monitoring = useBrain((s) => s.monitoring)
   const hardware = useBrain((s) => s.hardware)
   const model = useBrain((s) => s.model)
@@ -11,6 +14,9 @@ export default function RightSidebar() {
   const tokens = useBrain((s) => s.tokens)
   const generatedTokens = useBrain((s) => s.generatedTokens)
   const response = useBrain((s) => s.response)
+  const qkvStats = useBrain((s) => s.qkvStats)
+  const selectedLayer = useBrain((s) => s.selectedLayer)
+  const activeLayer = useBrain((s) => s.activeLayer)
   const setStore = useBrain((s) => s.set)
 
   const [clearedLogs, setClearedLogs] = useState(false)
@@ -21,9 +27,11 @@ export default function RightSidebar() {
   const gpuPercent = monitoring?.gpu_percent ?? null
   const ramUsed = monitoring?.ram_used_gb ?? hardware?.ram?.used_gb ?? null
   const ramTotal = monitoring?.ram_total_gb ?? hardware?.ram?.total_gb ?? null
-  const contextUsed = tokens.length + generatedTokens.length
-  const contextMax = model?.context_length ?? null
-  const modelName = model?.model_id ?? "model metadata unavailable"
+  const contextUsed = telemetry?.tokens.sequence_tokens ?? (inspectionMode === "limited" ? null : tokens.length + generatedTokens.length)
+  const contextMax = telemetry?.model.context_window ?? model?.context_length ?? null
+  const modelName = providerModel ?? model?.model_id ?? "model metadata unavailable"
+  const qkvLayer = selectedLayer ?? activeLayer
+  const qkvForLayer = qkvLayer === null ? [] : qkvStats.filter((item) => item.layer === qkvLayer && ["q", "k", "v"].includes(item.name))
 
   useEffect(() => {
     if (logScrollRef.current) {
@@ -35,7 +43,7 @@ export default function RightSidebar() {
 
   const renderMiniSpark = (val: number | null, color: string) => {
     if (val === null) return <span className="text-dim text-xxs">UNAVAILABLE</span>
-    const pts = [val * 0.7, val * 0.85, val * 0.75, val * 0.95, val]
+    const pts = [val]
     const maxVal = Math.max(10, val * 1.2)
     const pointsStr = pts
       .map((p, i) => `${i * 12},${22 - (p / maxVal) * 18}`)
@@ -49,8 +57,8 @@ export default function RightSidebar() {
           points={pointsStr}
         />
         <circle
-          cx={4 * 12}
-          cy={22 - (pts[4] / maxVal) * 18}
+          cx={0}
+          cy={22 - (pts[0] / maxVal) * 18}
           r="2"
           fill={color}
           className={running ? "pulse-dot" : ""}
@@ -136,7 +144,7 @@ export default function RightSidebar() {
 
           <div className="spark-stat-row">
             <div className="stat-meta">
-              <span className="meta-label">NEURAL ENGINE</span>
+              <span className="meta-label">INFERENCE ENGINE</span>
               <span className="meta-val text-emerald">{running ? "ACTIVE" : "STANDBY"}</span>
             </div>
             <span className="text-dim text-xxs">{running ? "INFERENCE EVENT" : "NO ACTIVE EVENT"}</span>
@@ -149,8 +157,8 @@ export default function RightSidebar() {
             <span className="sub-val">{ramUsed === null || ramTotal === null ? "—" : `${ramUsed.toFixed(1)} / ${ramTotal.toFixed(0)} GB`}</span>
           </div>
           <div className="sub-metric-item">
-            <span className="sub-label">CONTEXT</span>
-            <span className="sub-val text-cyan">{contextUsed} / {contextMax ?? "—"}</span>
+            <span className="sub-label">SEQUENCE TOKENS</span>
+            <span className="sub-val text-cyan">{contextUsed ?? "—"} / {contextMax ?? "—"}</span>
           </div>
         </div>
 
@@ -163,9 +171,9 @@ export default function RightSidebar() {
       {/* 2. Neural Engine Status */}
       <div className="right-card neural-status-card mono">
         <div className="right-card-header flex items-center justify-between">
-          <span className="card-title-sm">NEURAL ENGINE STATUS</span>
+          <span className="card-title-sm">INFERENCE ENGINE STATUS</span>
           <span className={`engine-state-tag ${running ? "pulse-amber" : "state-active"}`}>
-            {running ? "INFERENCING" : "STANDBY ACTIVE"}
+            {running ? "INFERENCING" : "IDLE"}
           </span>
         </div>
 
@@ -197,10 +205,38 @@ export default function RightSidebar() {
             ))}
           </svg>
           <div className="engine-readout text-xxs">
-            <span className="text-cyan">MPS ACCELERATOR ACTIVE</span>
-            <span className="text-dim">494M WEIGHT MATRIX LOADED</span>
+            <span className="text-cyan">{model?.device ? `MODEL DEVICE: ${model.device}` : "MODEL DEVICE: UNAVAILABLE"}</span>
+            <span className="text-dim">{model?.num_params ? `${(model.num_params / 1e6).toFixed(2)}M PARAMETERS` : "PARAMETER COUNT: UNAVAILABLE"}</span>
           </div>
         </div>
+      </div>
+
+      <div className="right-card qkv-inspector-card mono" data-testid="qkv-inspector">
+        <div className="right-card-header flex items-center justify-between">
+          <span className="card-title-sm">Q / K / V CALCULATION</span>
+          <span className="text-cyan text-xxs">{qkvLayer === null ? "SELECT A LAYER" : `LAYER ${qkvLayer + 1}`}</span>
+        </div>
+        <div className="qkv-equations">
+          <div><b>Q</b> = XWq</div>
+          <div><b>K</b> = XWk</div>
+          <div><b>V</b> = XWv</div>
+          <div>Q′ = RoPE(Q), K′ = RoPE(K)</div>
+          <div className="qkv-attention-equation">Attention = softmax(Q′K′<sup>T</sup> / √d<sub>k</sub>)V</div>
+        </div>
+        {qkvForLayer.length ? (
+          <div className="qkv-stats-list">
+            {qkvForLayer.map((item) => (
+              <div className="qkv-stat-row" key={`${item.layer}-${item.name}`}>
+                <strong>{item.name.toUpperCase()}</strong>
+                <span>{item.stats.n.toLocaleString()} values</span>
+                <span>norm {item.stats.l2_norm.toFixed(2)}</span>
+                <span>mean {item.stats.mean.toFixed(3)} · std {item.stats.std.toFixed(3)}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="qkv-empty">{inspectionMode === "limited" ? "Unavailable through provider runtime. Switch to Native Model mode for full tensor inspection." : "Run Deep Inspection to capture Q/K/V data."}</p>
+        )}
       </div>
 
       {/* 3. Event Logs Feed */}
@@ -260,7 +296,7 @@ export default function RightSidebar() {
             <span className="act-icon">📁</span>
             <span className="act-label">UPLOAD FILE</span>
           </button>
-          <button className="quick-act-btn" onClick={handleClearContext} title="Clear KV cache context">
+          <button className="quick-act-btn" onClick={handleClearContext} title="Clear BrainOS conversation and inspection state">
             <span className="act-icon">🧹</span>
             <span className="act-label">CLEAR CONTEXT</span>
           </button>
@@ -279,7 +315,7 @@ export default function RightSidebar() {
               <span className="text-cyan">📁 UPLOAD CONTEXT FILE</span>
             </div>
             <p className="shutdown-modal-body text-xs">
-              Attach document (.txt, .md, .json) to ingest into Memory Matrix and KV cache embeddings.
+              Load text from a local document into the prompt field. This does not index the file or add it to a provider cache.
             </p>
             <input
               type="file"

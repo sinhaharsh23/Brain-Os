@@ -41,10 +41,12 @@ def bearer_token(header: str | None) -> str | None:
 class GenerationParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    max_new_tokens: int = Field(default=128, ge=1, le=512)
+    max_new_tokens: int = Field(default=800, ge=1, le=1200)
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     top_p: float = Field(default=0.9, gt=0.0, le=1.0)
     top_k: int = Field(default=40, ge=0, le=200)
+    seed: int | None = Field(default=None, ge=0, le=2**63 - 1)
+    repetition_penalty: float = Field(default=1.0, gt=0, le=10)
     use_chat_template: bool = True
     model: str | None = None
 

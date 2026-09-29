@@ -74,7 +74,7 @@ export default function SettingsView() {
               <div className="setting-title text-bright text-xs">Active Context Window</div>
               <div className="setting-desc text-dim text-xxs">Maximum token sequence capacity</div>
             </div>
-            <span className="text-bright text-xs">{model?.context_length ?? 32768} Tokens</span>
+            <span className="text-bright text-xs">{model?.context_length ?? "Unavailable"} Tokens</span>
           </div>
         </div>
       </div>

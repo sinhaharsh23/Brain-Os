@@ -13,8 +13,8 @@ function OutputTab() {
   const inspectionMode = useBrain((s) => s.inspectionMode)
   const usage = useBrain((s) => s.usage)
   return (
-    <div>
-      <div className="token-strip" style={{ marginBottom: 6 }}>
+    <div className="output-tab-body">
+      <div className="token-strip output-token-strip">
         {generatedTokens.map((t) => (
           <span key={t.step} className="token-chip generated" title={`step ${t.step} · p=${(t.probability * 100).toFixed(1)}%`}>
             {t.text === "\n" ? "\\n" : t.text}
@@ -22,12 +22,12 @@ function OutputTab() {
         ))}
         {running && <span className="token-chip" style={{ borderStyle: "dashed", color: "var(--warn)" }}>▮</span>}
       </div>
-      <div style={{ whiteSpace: "pre-wrap", fontFamily: "var(--mono)", fontSize: 12.5, lineHeight: 1.6, maxHeight: 110, overflowY: "auto" }}>
+      <div className="output-response" aria-live="polite">
         {response || <span className="muted">— waiting for output —</span>}
       </div>
       {summary && (
         <div className="muted" style={{ fontSize: 10.5, marginTop: 4 }}>
-          {inspectionMode === "limited" ? "External Observation" : `${summary.num_output_tokens} tokens`} · {summary.timings.tokens_per_second ?? "—"} tok/s · TTFT {summary.timings.ttft_ms ?? "—"}ms · total {summary.timings.total_ms}ms
+          {inspectionMode === "limited" ? "External Observation" : `${summary.num_output_tokens} tokens`} · {summary.timings.tokens_per_second ?? "—"} E2E tok/s · TTFT {summary.timings.ttft_ms ?? "—"}ms · total {summary.timings.total_ms}ms
           {usage && ` · usage ${usage.input_tokens ?? "?"}/${usage.output_tokens ?? "?"}/${usage.total_tokens ?? "?"}`}
         </div>
       )}
@@ -89,7 +89,7 @@ function SystemTab() {
       <span className="k">process</span>
       <span className="v">{mon.process_ram_gb.toFixed(2)} GB</span>
       <span className="k">GPU</span>
-      <span className="v">{mon.gpu_percent !== null ? `${mon.gpu_percent.toFixed(0)}%` : "no GPU (CPU mode)"}</span>
+      <span className="v">{mon.gpu_percent !== null ? `${mon.gpu_percent.toFixed(0)}%` : "GPU utilization unavailable"}</span>
       <span className="k">VRAM</span>
       <span className="v">{mon.vram_used_gb !== null ? `${mon.vram_used_gb.toFixed(2)} / ${mon.vram_total_gb?.toFixed(1)} GB` : "—"}</span>
       <span className="k">model</span>
@@ -165,7 +165,7 @@ function ReplayTab() {
             </span>
             <span className="muted" style={{ fontSize: 10 }}>
               {" "}
-              · {s.num_output_tokens} tok · {JSON.stringify(s.timings.tokens_per_second) ?? "?"} t/s
+              · {s.num_output_tokens} tok · {JSON.stringify(s.timings.tokens_per_second) ?? "?"} E2E tok/s
             </span>
           </div>
           <div className="flex">

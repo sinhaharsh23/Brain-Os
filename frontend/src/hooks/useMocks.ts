@@ -16,7 +16,8 @@ export function useMockKnowledgeBase() {
     { id: "kb-03", title: "Qwen2.5 GQA & RoPE Parameterization", tokens: 1150, relevance: 0.94, category: "Model" },
     { id: "kb-04", title: "KV Cache Dynamic Compaction Protocol", tokens: 670, relevance: 0.82, category: "Memory" },
   ])
-  return { docs, totalDocs: docs.length, totalTokens: 4130 }
+  const demo = new URLSearchParams(window.location.search).get("demo") === "1"
+  return { docs: demo ? docs : [], totalDocs: demo ? docs.length : 0, totalTokens: demo ? docs.reduce((total, doc) => total + doc.tokens, 0) : 0, demo }
 }
 
 // TODO: Backend integration - Replace with local fine-tuning / training loss telemetry WebSocket stream
@@ -63,7 +64,7 @@ export function useMockPlugins() {
 
 // Battery / Power status hook (uses standard browser battery API with graceful fallback)
 export function useMockBattery() {
-  const [battery, setBattery] = useState<{ level: number; charging: boolean }>({ level: 100, charging: true })
+  const [battery, setBattery] = useState<{ level: number | null; charging: boolean | null }>({ level: null, charging: null })
 
   useEffect(() => {
     // Check if browser supports battery API

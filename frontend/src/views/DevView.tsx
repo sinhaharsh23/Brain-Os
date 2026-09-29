@@ -1,3 +1,4 @@
+import TelemetryDetails from "../components/TelemetryDetails"
 import { useEffect, useState } from "react"
 import { useBrain } from "../store/useBrainStore"
 import { api } from "../api/client"
@@ -53,6 +54,8 @@ export default function DevView() {
 
   return (
     <div style={{ padding: 12, overflowY: "auto", height: "100%", fontFamily: "var(--mono)", fontSize: 11 }}>
+      <TelemetryDetails />
+      <p className="muted">Prefill processes the chat-formatted input to initialize model state. Each autoregressive decode step traverses the transformer stack again, until a stop token or the output limit.</p>
       <div className="panel-title" style={{ marginTop: 0 }}>
         Developer mode — raw events & tensor probes
       </div>

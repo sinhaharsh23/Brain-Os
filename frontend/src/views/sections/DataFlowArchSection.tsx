@@ -1,13 +1,12 @@
 import { useBrain } from "../../store/useBrainStore"
-import { useMockKnowledgeBase } from "../../hooks/useMocks"
 
 export default function DataFlowArchSection() {
+  const model = useBrain((s) => s.model)
   const running = useBrain((s) => s.running)
   const tokens = useBrain((s) => s.tokens)
   const generatedTokens = useBrain((s) => s.generatedTokens)
-  const { totalDocs } = useMockKnowledgeBase()
 
-  const totalTokens = tokens.length + generatedTokens.length || 24
+  const totalTokens = tokens.length + generatedTokens.length
 
   return (
     <div className="data-flow-arch-container mono">
@@ -26,7 +25,7 @@ export default function DataFlowArchSection() {
             <span className="storage-icon">📚</span>
             <div className="storage-text">
               <span className="storage-title">KNOWLEDGE BASE / RAG</span>
-              <span className="storage-sub text-xxs text-dim">{totalDocs} Docs Indexed</span>
+              <span className="storage-sub text-xxs text-dim">Index state unavailable · no retrieval used</span>
             </div>
           </div>
 
@@ -37,8 +36,8 @@ export default function DataFlowArchSection() {
           <div className="arch-storage-node memory-matrix-node">
             <span className="storage-icon">🗄️</span>
             <div className="storage-text">
-              <span className="storage-title">MEMORY MATRIX (KV CACHE)</span>
-              <span className="storage-sub text-xxs text-dim">{totalTokens} Tokens Cached</span>
+              <span className="storage-title">SEQUENCE LENGTH</span>
+              <span className="storage-sub text-xxs text-dim">{totalTokens} Sequence Tokens</span>
             </div>
           </div>
         </div>
@@ -64,7 +63,7 @@ export default function DataFlowArchSection() {
           <div className="pipeline-node node-embed">
             <span className="node-badge">03</span>
             <span className="node-title">Embedding Engine</span>
-            <span className="node-detail text-xxs text-dim">896d Tensor</span>
+            <span className="node-detail text-xxs text-dim">{model?.hidden_size ?? "—"}d Tensor</span>
           </div>
 
           <div className="pipeline-connector">➔</div>
@@ -72,7 +71,7 @@ export default function DataFlowArchSection() {
           <div className={`pipeline-node node-transformer ${running ? "computing-node" : ""}`}>
             <span className="node-badge">04</span>
             <span className="node-title">Neural Network</span>
-            <span className="node-detail text-xxs text-dim">24 Layers</span>
+            <span className="node-detail text-xxs text-dim">{model?.num_layers ?? "—"} Layers</span>
           </div>
 
           <div className="pipeline-connector">➔</div>

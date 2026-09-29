@@ -12,7 +12,7 @@ export default function SystemMonitorView() {
         <div>
           <h2 className="section-title">SYSTEM MONITOR (PERFORMANCE & TELEMETRY)</h2>
           <span className="section-subtitle text-dim text-xs">
-            Real-time Apple Silicon Metal Performance Shaders and memory utilization
+            Real system CPU, memory, and accelerator measurements when available
           </span>
         </div>
         <span className={hardware?.backend === "MPS" ? "badge-emerald" : "badge-outline"}>

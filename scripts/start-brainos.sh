@@ -23,6 +23,30 @@ fi
 export HF_HOME="${HF_HOME:-$ROOT_DIR/models/hf}"
 echo "HF_HOME: $HF_HOME"
 
+echo ""
+echo "BrainOS Local Model"
+LOCAL_MODEL_REPORT=$(cd "$ROOT_DIR/backend" && PYTHONPATH="$ROOT_DIR/backend" "$PYTHON" - <<'PY'
+from app.config import settings
+from app.models.resolver import LocalModelResolver, LocalModelError
+
+resolver = LocalModelResolver()
+try:
+    resolved = resolver.resolve_model()
+except LocalModelError as exc:
+    print(f"Model: {settings.default_model}")
+    print("Source: NOT INSTALLED")
+    print("Path: —")
+    print("Network Required: NO (startup will not contact Hugging Face)")
+    print(f"Status: {exc}")
+else:
+    print(f"Model: {resolved.model_id}")
+    print(f"Source: LOCAL CHECKPOINT ({resolved.source})")
+    print(f"Path: {resolved.path}")
+    print("Network Required: NO")
+PY
+)
+printf '%s\n' "$LOCAL_MODEL_REPORT"
+
 DEVICE=$($PYTHON -c "import torch; print('MPS (Apple Silicon GPU)' if torch.backends.mps.is_available() else ('CUDA' if torch.cuda.is_available() else 'CPU'))" 2>/dev/null || echo "CPU")
 echo "Compute Device: $DEVICE"
 

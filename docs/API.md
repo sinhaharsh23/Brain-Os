@@ -62,7 +62,7 @@ Connect to `/ws` and send:
   "action": "run",
   "prompt": "Explain artificial intelligence.",
   "params": {
-    "max_new_tokens": 64,
+    "max_new_tokens": 800,
     "temperature": 0.7,
     "top_p": 0.9,
     "top_k": 40,
@@ -77,4 +77,4 @@ Other commands are `cancel`, `pause_inference`, `resume_inference`, `replay`, `r
 
 `tokenization.complete` includes `context_used`, `context_remaining`, and `context_length`. `inference.complete.data.timings` includes `ttft_ms`, `tokens_per_second`, and `total_ms` when available.
 
-External provider runs use the same `run` command with `provider` set to `openai`, `anthropic`, or `google`. The optional `params.model` selects a provider model; `/api/providers` lists the configured defaults. API keys are read only by the backend from environment variables or the backend `.env` file and are never returned to the frontend. External events are `external.started`, `external.chunk`, and `external.usage`, followed by `inference.complete`; timing and provider-reported token usage are included when available. No internal tensor events are emitted for proprietary providers, and the UI labels these runs `External Observation`.
+Cloud provider runs use the same `run` command with `provider` set to `openai`, `anthropic`, or `gemini` (`google` remains an accepted compatibility alias). The optional `params.model` selects a configured provider model; `/api/providers` and `/api/provider-registry` expose the provider-neutral catalog. API keys are read only by the backend from environment variables or the backend `.env` file and are never returned to the frontend. Cloud events normalize to `generation.started`, `provider.started`, `response.created`, `response.text.delta`, `provider.usage`, `response.text.completed`, and `generation.completed` (or cancellation/error), with timing and provider-reported usage included when available. No internal tensor events are emitted for proprietary providers, and the UI labels these runs `CLOUD · API OBSERVABILITY`.

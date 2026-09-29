@@ -20,6 +20,7 @@ def test_initial_migration_is_reproducible_and_preserves_data(tmp_path):
     assert EXPECTED_TABLES.issubset(set(inspect(restarted.engine).get_table_names()))
 
     config = Config(str(Path(__file__).resolve().parents[2] / "alembic.ini"))
+    config.set_main_option("script_location", str(Path(__file__).resolve().parents[1] / "alembic"))
     config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
     command.check(config)
 

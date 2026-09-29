@@ -64,15 +64,48 @@ export default function App() {
   const [ready, setReady] = useState(false)
 
   useEffect(() => {
+    let cancelled = false
+    const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
+    const hydrateModel = async () => {
+      for (let attempt = 0; attempt < 60 && !cancelled; attempt += 1) {
+        try {
+          const model = await api.model()
+          if (!cancelled) useBrain.getState().set({ nativeModel: model, ...(!useBrain.getState().provider || useBrain.getState().provider === "qwen-local" ? { model, modelStatus: "loaded", provider: "qwen-local", inspectionMode: "deep" as const } : {}) })
+          return
+        } catch {
+          await wait(500)
+        }
+      }
+    }
+    const hydrateProviders = async () => {
+      for (let attempt = 0; attempt < 60 && !cancelled; attempt += 1) {
+        try {
+          const catalog = await api.providerRegistry()
+          if (!cancelled && catalog.providers.length) useBrain.getState().set({ providerCatalog: catalog.providers, modelCatalog: catalog.models })
+          if (catalog.providers.length) return
+        } catch {
+          // Backend startup and model loading can be transient; retry below.
+        }
+        await wait(500)
+      }
+    }
     connect()
-    api.health().catch(() => {})
+    api.health().then((health) => {
+      const status = String(health.model_status ?? "not_loaded")
+      const error = health.model_error ? String(health.model_error) : null
+      useBrain.getState().set({ modelStatus: status, inferenceError: error })
+    }).catch(() => {})
     api.hardware().then((h) => useBrain.getState().set({ hardware: h })).catch(() => {})
-    api.model().then((m) => useBrain.getState().set({ model: m, modelStatus: "loaded" })).catch(() => {})
+    void hydrateModel()
+    void hydrateProviders()
     api.authMe().then((auth) => useBrain.getState().set({ authMode: auth.mode, user: auth.user, authRequired: auth.mode === "multi_user" && !auth.user })).catch((error) => {
       if (error?.status === 401) useBrain.getState().set({ authMode: "multi_user", authRequired: true })
     })
     setReady(true)
-    return () => disconnect()
+    return () => {
+      cancelled = true
+      disconnect()
+    }
   }, [])
 
   if (!ready) return <div className="boot">BrainOS booting…</div>

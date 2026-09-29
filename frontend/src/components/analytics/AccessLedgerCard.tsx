@@ -1,81 +1,56 @@
-import { useMemo } from "react"
 import { useBrain } from "../../store/useBrainStore"
 
 interface LedgerEntry {
   id: string
-  action: "READ" | "WRITE" | "AUTH" | "SYNC" | "EXEC"
+  action: "READ" | "EXEC"
   resource: string
   metric: string
   valNorm: number
-  status: "ALLOWED" | "ACTIVE" | "SYNCED" | "COMMITTED"
+  status: "ACTIVE" | "SYNCED" | "COMMITTED"
   layerIdx?: number
 }
 
 export default function AccessLedgerCard() {
   const layers = useBrain((s) => s.layers)
-  const tokens = useBrain((s) => s.tokens)
-  const generatedTokens = useBrain((s) => s.generatedTokens)
   const running = useBrain((s) => s.running)
-  const monitoring = useBrain((s) => s.monitoring)
+  const inspectionMode = useBrain((s) => s.inspectionMode)
+  const telemetry = useBrain((s) => s.telemetry)
+  const kvCache = useBrain((s) => s.kvCache)
+  const currentStep = useBrain((s) => s.currentStep)
   const selectedLayer = useBrain((s) => s.selectedLayer)
   const selectLayer = useBrain((s) => s.selectLayer)
   const model = useBrain((s) => s.model)
 
-  const totalTokens = tokens.length + generatedTokens.length
-
-  const ledgerEntries = useMemo(() => {
-    const list: LedgerEntry[] = []
-    const layerKeys = Object.keys(layers).map(Number).sort((a, b) => b - a)
-
-    // KV Cache entry
-    list.push({
-      id: "kv-cache",
-      action: "READ",
-      resource: `sys.kv_cache.seq_${totalTokens}`,
-      metric: `${totalTokens} context tokens`,
-      valNorm: model?.context_length ? Math.min(100, (totalTokens / model.context_length) * 100) : 0,
-      status: running ? "ACTIVE" : "SYNCED",
+  const cache = kvCache[currentStep] ?? Object.values(kvCache).at(-1)
+  const layerKeys = Object.keys(layers).map(Number).sort((a, b) => b - a).slice(0, 5)
+  const norms = layerKeys.map((layer) => Math.abs(layers[layer]?.norm ?? 0))
+  const maxNorm = Math.max(...norms, 1e-12)
+  const ledgerEntries: LedgerEntry[] = []
+  if (cache) ledgerEntries.push({
+    id: `kv-cache-${cache.step}`, action: "READ", resource: "runtime.kv_cache",
+    metric: `sequence ${cache.seq_length} · ${(cache.total_kb).toFixed(1)} KB · ${cache.num_layers} layers`,
+    valNorm: model?.context_length ? Math.min(100, cache.seq_length / model.context_length * 100) : 0,
+    status: running ? "ACTIVE" : "SYNCED",
+  })
+  for (const layer of layerKeys) {
+    const state = layers[layer]
+    if (!state) continue
+    ledgerEntries.push({
+      id: `layer-${layer}`, action: "EXEC", resource: `transformer.layer_${String(layer).padStart(2, "0")}.output_hidden_state`,
+      metric: `captured output norm ${state.norm.toFixed(3)}`,
+      valNorm: Math.abs(state.norm) / maxNorm * 100,
+      status: running && state.active ? "ACTIVE" : "COMMITTED", layerIdx: layer,
     })
-
-    // Process memory footprint if available
-    if (monitoring?.process_ram_gb) {
-      list.push({
-        id: "sys-ram-alloc",
-        action: "AUTH",
-        resource: "mem.process.rss_footprint",
-        metric: `${monitoring.process_ram_gb.toFixed(2)} GB`,
-        valNorm: Math.min(100, (monitoring.process_ram_gb / 8) * 100),
-        status: "ALLOWED",
-      })
-    }
-
-    // Active layer norms
-    for (const l of layerKeys.slice(0, 6)) {
-      const st = layers[l]
-      if (!st) continue
-      const normVal = st.norm
-      list.push({
-        id: `layer-${l}`,
-        action: l % 2 === 0 ? "WRITE" : "SYNC",
-        resource: `weights.attn_qkv.layer_${String(l).padStart(2, "0")}`,
-        metric: `norm ${normVal.toFixed(2)}`,
-        valNorm: Math.min(100, (normVal / 30) * 100),
-        status: running && st.active ? "ACTIVE" : "COMMITTED",
-        layerIdx: l,
-      })
-    }
-
-    return list.slice(0, 6)
-  }, [layers, totalTokens, running, monitoring, model])
+  }
 
   return (
     <div className="telemetry-card access-ledger-card">
       <div className="card-header">
         <div className="flex items-center gap-2">
-          <span className="card-title">ACCESS LEDGER</span>
-          <span className="badge-cyan">AUTH: ACTIVE</span>
+          <span className="card-title">CAPTURE INDEX</span>
+          <span className="badge-cyan">REAL CAPTURES ONLY</span>
         </div>
-        <span className="text-xs text-muted mono">{model?.num_layers ?? "—"} LAYERS REGISTERED</span>
+        <span className="text-xs text-muted mono">{telemetry?.model.num_layers ?? model?.num_layers ?? "—"} LAYERS</span>
       </div>
 
       <div className="ledger-table">
@@ -85,7 +60,7 @@ export default function AccessLedgerCard() {
           <span className="col-metric">METRIC</span>
           <span className="col-stat">STATUS</span>
         </div>
-        {ledgerEntries.length === 0 && <div className="muted empty-ledger-msg">no access events captured yet</div>}
+        {ledgerEntries.length === 0 && <div className="muted empty-ledger-msg">{inspectionMode === "limited" ? "Internal tensor events unavailable through this provider." : "No cache or layer captures recorded for this run."}</div>}
         {ledgerEntries.map((item) => {
           const isSelected = item.layerIdx !== undefined && selectedLayer === item.layerIdx
           return (

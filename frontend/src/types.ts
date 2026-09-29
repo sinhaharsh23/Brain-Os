@@ -42,11 +42,53 @@ export interface ProviderDescriptor {
   provider_id: string
   display_name: string
   kind: string
+  provider_type?: "local" | "cloud"
+  local_or_cloud?: "local" | "cloud"
   inspection_mode: "deep" | "limited"
   availability: string
+  configured?: boolean
+  available?: boolean
+  configuration_error?: string | null
+  configuration_status?: "configured" | "missing" | "unknown" | string
+  connection_status?: "available" | "not_tested" | "authentication_failed" | "network_unavailable" | "rate_limited" | "provider_unavailable" | "unavailable" | string
+  last_error_code?: string | null
   limitation: string
   capabilities: Record<string, boolean>
   models: string[]
+  model_descriptors?: ModelDescriptor[]
+}
+
+export interface ModelDescriptor {
+  id?: string
+  model_id: string
+  provider: string
+  display_name: string
+  mode: "local" | "cloud"
+  local_or_cloud?: "local" | "cloud"
+  architecture?: string | null
+  capabilities: Record<string, boolean>
+  context_length?: number | null
+  loaded?: boolean
+  available?: boolean
+  device?: string | null
+  parameter_count?: number | null
+  supports_streaming: boolean
+  supports_introspection: boolean
+  configuration_error?: string | null
+}
+
+export interface ChatMessage {
+  id: string
+  role: "system" | "user" | "assistant" | "tool"
+  content: string
+  createdAt: number
+  provider?: string | null
+  model?: string | null
+  mode?: "local" | "cloud"
+  status?: "streaming" | "complete" | "error" | "cancelled"
+  responseId?: string | null
+  usage?: ExternalUsage | null
+  metadata?: Record<string, unknown>
 }
 
 export interface AuthUser {
@@ -115,6 +157,8 @@ export interface GenToken {
   rank: number | null
   position: number
   time_ms: number
+  entropy?: number
+  sampling_method?: string
   pca3: [number, number, number] | null
 }
 
@@ -132,6 +176,7 @@ export interface EmbeddingsComplete {
   explained_variance: number[]
   pca_method: string
   embedding_dim: number
+  tensor?: { shape: number[]; dtype: string; device: string; source: string }
 }
 
 export interface QkvStat {
@@ -165,8 +210,41 @@ export interface MonitorSnapshot {
   gpu_percent: number | null
   vram_used_gb: number | null
   vram_total_gb: number | null
+  accelerator_memory_label?: string
+  accelerator_allocated_gb?: number | null
+  accelerator_total_gb?: number | null
   model_loaded: boolean
   ts: number
+}
+
+export interface KvCacheLayer {
+  layer: number
+  key_shape: number[]
+  value_shape: number[]
+  bytes: number
+  kb: number
+}
+
+export interface KvCacheSnapshot {
+  step: number
+  seq_length: number
+  total_bytes: number
+  total_kb: number
+  total_mb: number
+  num_layers: number
+  layers: KvCacheLayer[]
+}
+
+export interface ResidualSummary {
+  layer: number
+  input_norm: number
+  attn_delta_norm: number
+  post_attn_norm: number
+  mlp_delta_norm: number
+  output_norm: number
+  cosine_similarity: number
+  attn_ratio: number
+  mlp_ratio: number
 }
 
 export interface Summary {
@@ -183,6 +261,9 @@ export interface Summary {
   provider?: string
   inspection_mode?: "deep" | "limited"
   usage?: ExternalUsage | null
+  response_id?: string | null
+  stop_reason?: string | null
+  local_or_cloud?: "local" | "cloud"
 }
 
 export interface SessionSummary {
@@ -210,6 +291,9 @@ export interface TensorVectorResponse {
   dtype?: string
   token?: TokenInfo | GenToken
   neuron?: { index: number; value: number }
+  query_key_matches?: { token_index: number; raw_score: number; scaled_score: number; attention_probability: number }[]
+  value_contributions?: { token_index: number; attention_weight: number; contribution_norm: number }[]
+  gqa?: { query_heads: number; kv_heads: number; requested_query_head: number; mapped_kv_head: number; attention_type: string }
 }
 
 export interface AttentionResponse {
@@ -220,6 +304,10 @@ export interface AttentionResponse {
   weights: { token_index: number; weight: number }[]
   stats: TensorStats
   is_full_matrix: boolean
+  matrix?: number[][]
+  matrix_start?: number
+  average_weights?: { token_index: number; weight: number }[]
+  head_summaries?: { head: number; entropy: number; max_weight: number; top_position: number }[]
 }
 
 export interface DevEntry {
@@ -245,4 +333,16 @@ export interface ReplayState {
   status: string
   index: number
   count: number
+}
+
+export interface Telemetry {
+  provider: { id: string; name: string; runtime: string }
+  model: { id: string; status?: string; architecture?: string | null; parameter_count?: number | null; context_window?: number | null; config_dtype?: string | null; runtime_dtype?: string | null; device?: string | null; quantization?: string | null; num_layers?: number | null; hidden_size?: number | null; num_attention_heads?: number | null; num_kv_heads?: number | null; intermediate_size?: number | null; [key: string]: unknown }
+  capabilities: Record<string, boolean>
+  tokens: Record<string, number | null>
+  timing: Record<string, number | null>
+  performance: Record<string, number | null>
+  sampling: Record<string, unknown>
+  tensors: Record<string, unknown>
+  sources: Record<string, string>
 }

@@ -12,13 +12,15 @@ export default function NeuralGraphHero() {
   const selectedToken = useBrain((s) => s.selectedToken)
   const selectToken = useBrain((s) => s.selectToken)
   const summary = useBrain((s) => s.summary)
+  const telemetry = useBrain((s) => s.telemetry)
+  const inspectionMode = useBrain((s) => s.inspectionMode)
   const candidates = useBrain((s) => s.candidates)
   const attentionLinks = useBrain((s) => s.attentionLinks)
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const [frame, setFrame] = useState(0)
 
-  const numTokens = tokens.length + generatedTokens.length
+  const numTokens = telemetry?.tokens.sequence_tokens ?? (inspectionMode === "limited" ? null : tokens.length + generatedTokens.length)
   const activeStep = running ? currentStep : generatedTokens.length
   const capturedEdges = Object.values(attentionLinks).reduce((count, links) => count + links.length, 0)
   const attentionSpan = (start: number, end: number) => {
@@ -147,7 +149,7 @@ export default function NeuralGraphHero() {
       <div className="neural-ribbon">
         <div className="ribbon-segment">
           <span className="ribbon-label">GRAPH:</span>
-          <span className="ribbon-val cyan">QWEN2.5-0.5B-INSTRUCT</span>
+          <span className="ribbon-val cyan">{model?.model_id ?? "Unavailable"}</span>
         </div>
         <div className="ribbon-divider">|</div>
         <div className="ribbon-segment">
@@ -162,17 +164,17 @@ export default function NeuralGraphHero() {
         <div className="ribbon-divider">|</div>
         <div className="ribbon-segment">
           <span className="ribbon-label">BUS READERS:</span>
-          <span className="ribbon-val">{numTokens || 14}</span>
+          <span className="ribbon-val">{numTokens ?? "Unavailable"}</span>
         </div>
         <div className="ribbon-divider">|</div>
         <div className="ribbon-segment">
           <span className="ribbon-label">DEVICE:</span>
-          <span className="ribbon-val green">APPLE SILICON MPS</span>
+          <span className="ribbon-val green">{model?.device ?? "Unavailable"}</span>
         </div>
         <div className="ribbon-divider">|</div>
         <div className="ribbon-segment">
           <span className="ribbon-label">T:</span>
-          <span className="ribbon-val">{summary?.timings?.tokens_per_second ? `${summary.timings.tokens_per_second} t/s` : "1.17"}</span>
+          <span className="ribbon-val">{summary?.timings?.tokens_per_second ? `${summary.timings.tokens_per_second} E2E tok/s` : "Unavailable"}</span>
         </div>
         <div className="ribbon-divider">|</div>
         <div className="ribbon-segment">
@@ -241,7 +243,7 @@ export default function NeuralGraphHero() {
               <div className="card-fields">
                 <div className="field-row"><span>hidden_dim</span><span className="val cyan">{hiddenSize ?? "—"}</span></div>
                 <div className="field-row"><span>pca_project</span><span className="val">3D_norm</span></div>
-                <div className="field-row"><span>dtype</span><span className="val">float32</span></div>
+                <div className="field-row"><span>dtype</span><span className="val">{model?.dtype ?? "Unavailable"}</span></div>
               </div>
               <div className="card-port right" />
             </div>
@@ -260,7 +262,7 @@ export default function NeuralGraphHero() {
               <div className="card-tag purple">kv_cache_buffer</div>
               <div className="card-fields">
                 <div className="field-row"><span>kv_heads</span><span className="val purple">2 (GQA)</span></div>
-                <div className="field-row"><span>head_dim</span><span className="val">64</span></div>
+                <div className="field-row"><span>head_dim</span><span className="val">{model?.head_dim ?? "Unavailable"}</span></div>
                 <div className="field-row"><span>cache_mode</span><span className="val">dynamic</span></div>
               </div>
               <div className="card-port right" />
@@ -270,7 +272,7 @@ export default function NeuralGraphHero() {
               <div className="card-tag blue">causal_mask</div>
               <div className="card-fields">
                 <div className="field-row"><span>is_causal</span><span className="val blue">true</span></div>
-                <div className="field-row"><span>sliding_window</span><span className="val">32k</span></div>
+                <div className="field-row"><span>sliding_window</span><span className="val">{String(model?.extra.sliding_window ?? "Unavailable")}</span></div>
                 <div className="field-row"><span>attn_impl</span><span className="val">eager</span></div>
               </div>
               <div className="card-port right" />
@@ -281,7 +283,7 @@ export default function NeuralGraphHero() {
             <div className="bus-container">
               <div className="bus-header">
                 <div className="bus-title">SHARED CONTEXT BUS</div>
-                <div className="bus-badge">{numTokens} TOKENS</div>
+                <div className="bus-badge">{numTokens ?? "UNAVAILABLE"} SEQUENCE TOKENS</div>
               </div>
 
               <div className="bus-slots-list">
@@ -348,9 +350,9 @@ export default function NeuralGraphHero() {
               <div className="card-port left" />
               <div className="card-tag amber">swiglu_mlp_block</div>
               <div className="card-fields">
-                <div className="field-row"><span>gate_proj</span><span className="val amber">4,864</span></div>
-                <div className="field-row"><span>up_proj</span><span className="val">4,864</span></div>
-                <div className="field-row"><span>down_proj</span><span className="val">896</span></div>
+                <div className="field-row"><span>gate_proj</span><span className="val amber">{model?.intermediate_size ?? "Unavailable"}</span></div>
+                <div className="field-row"><span>up_proj</span><span className="val">{model?.intermediate_size ?? "Unavailable"}</span></div>
+                <div className="field-row"><span>down_proj</span><span className="val">{model?.hidden_size ?? "Unavailable"}</span></div>
               </div>
             </div>
 
@@ -358,7 +360,7 @@ export default function NeuralGraphHero() {
               <div className="card-port left" />
               <div className="card-tag cyan">rmsnorm_residual</div>
               <div className="card-fields">
-                <div className="field-row"><span>eps</span><span className="val cyan">1e-06</span></div>
+                <div className="field-row"><span>eps</span><span className="val cyan">{String(model?.extra.rms_norm_eps ?? "Unavailable")}</span></div>
                 <div className="field-row"><span>layers</span><span className="val">{model?.num_layers ?? "—"}</span></div>
                 <div className="field-row"><span>active_norm</span><span className="val">{activeLayerState?.norm?.toFixed(2) ?? "—"}</span></div>
               </div>

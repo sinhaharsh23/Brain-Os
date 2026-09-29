@@ -34,7 +34,7 @@ export default function ResponseHUD() {
         <div className="flex items-center gap-2">
           {summary && (
             <span className="text-xs text-muted mono">
-              {summary.num_output_tokens} TOK · {summary.timings?.tokens_per_second ?? "—"} TOK/S · TTFT {summary.timings?.ttft_ms ?? "—"}MS
+              {summary.num_output_tokens ?? "Unavailable"} GENERATED TOK · {summary.timings?.tokens_per_second ?? "—"} E2E TOK/S · TTFT {summary.timings?.ttft_ms ?? "—"}MS
             </span>
           )}
           {response && (
@@ -65,17 +65,8 @@ export default function ResponseHUD() {
         </div>
       )}
 
-      <div className="hud-terminal-body mono">
-        {response ? (
-          <div className="hud-text-content">
-            {response}
-            {running && <span className="streaming-cursor">▮</span>}
-          </div>
-        ) : (
-          <div className="hud-placeholder text-muted">
-            {running ? "Initializing generation on MPS..." : "— awaiting prompt dispatch from neural console —"}
-          </div>
-        )}
+      <div className="hud-terminal-body mono hud-output-location">
+        {running ? "Generating · live token stream above" : response ? "Response is shown in the bottom Output panel" : "Awaiting prompt dispatch"}
       </div>
     </div>
   )

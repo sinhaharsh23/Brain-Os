@@ -129,8 +129,11 @@ def test_websocket_parameter_validation_rejects_invalid_values():
         validate_generation_params({"temperature": float("nan")}, 128, 512)
     with pytest.raises(ValueError):
         validate_generation_params({"top_p": 0}, 128, 512)
+    for value in (1, 256, 512, 799, 800, 1200):
+        validated = validate_generation_params({"max_new_tokens": value}, 128, 1200)
+        assert validated["max_new_tokens"] == value
     with pytest.raises(ValueError):
-        validate_generation_params({"max_new_tokens": 513}, 128, 512)
+        validate_generation_params({"max_new_tokens": 1201}, 128, 1200)
     with pytest.raises(ValueError):
         validate_generation_params({"unexpected": 1}, 128, 512)
     with pytest.raises(ValueError):

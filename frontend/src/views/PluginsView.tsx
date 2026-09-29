@@ -7,7 +7,7 @@ export default function PluginsView() {
     <div className="section-page-container mono">
       <div className="section-header-wrap flex items-center justify-between">
         <div>
-          <h2 className="section-title">PLUGINS & EXTENSIONS</h2>
+          <h2 className="section-title">DEMO DATA · PLUGINS & EXTENSIONS</h2>
           <span className="section-subtitle text-dim text-xs">
             Ecosystem extensions, execution sidecars, and tool call hooks
           </span>
