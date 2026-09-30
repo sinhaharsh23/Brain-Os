@@ -124,6 +124,8 @@ test.describe("BrainOS 3.0 original dashboard", () => {
   })
 
   test("exposes the local and cloud provider choices", async ({ page }) => {
+    const ollamaResponse = await page.request.get("/api/providers/ollama/models")
+    const ollamaModels = (await ollamaResponse.json()).models as string[]
     await page.goto("/")
     await expectOriginalShell(page)
     const provider = page.locator("select").first()
@@ -136,18 +138,26 @@ test.describe("BrainOS 3.0 original dashboard", () => {
     await expect(model.locator("option").first()).toContainText(/gpt|model/i)
     await provider.selectOption("ollama")
     await expect(provider).toHaveValue("ollama")
-    await expect(page.getByText(/Deep Inspection/)).toBeVisible()
-    await expect(model.locator("option").first()).toContainText("llama3.2:latest")
+    await expect(page.getByText("Deep Inspection", { exact: true })).toBeVisible()
+    if (ollamaModels.length > 0) {
+      await expect(model.locator("option").first()).toContainText(ollamaModels[0])
+    } else {
+      await expect(model).toHaveCount(0)
+    }
     await provider.selectOption("qwen-local")
   })
 
   test("uses Ollama GGUF captures across clickable inspection views", async ({ page }) => {
+    const ollamaResponse = await page.request.get("/api/providers/ollama/models")
+    const ollamaModels = (await ollamaResponse.json()).models as string[]
+    test.skip(ollamaModels.length === 0, "requires Ollama with an installed model")
+
     await page.goto("/")
     await expectOriginalShell(page)
     const provider = page.locator("select").first()
     await provider.selectOption("ollama")
     const model = page.getByLabel("Model")
-    await expect(model.locator("option").first()).toContainText("llama3.2:latest")
+    await expect(model.locator("option").first()).toContainText(ollamaModels[0])
     await runShortQuestion(page, "what is ai")
     await page.getByRole("button", { name: /Token Engine/ }).first().click()
     await expect(page.getByText(/Tokenization — real tokenizer output/)).toBeVisible()
