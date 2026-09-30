@@ -25,20 +25,28 @@ export default function DevView() {
   }
 
   const probeTensors = async () => {
-    const sid = useBrain.getState().sessionId
+    const session = useBrain.getState()
+    const sid = session.sessionId
     if (!sid) return
+    const latestGenerated = session.generatedTokens[session.generatedTokens.length - 1]
+    // A generated token is predicted from the preceding input position. The
+    // active forward capture therefore belongs to position - 1; the latest
+    // output token itself has not necessarily been fed back through a pass.
+    const position = latestGenerated ? Math.max(0, latestGenerated.position - 1) : session.tokens[session.tokens.length - 1]?.position ?? 0
+    const step = latestGenerated?.step ?? 0
     const out: string[] = []
     const checks: [string, () => Promise<unknown>][] = [
-      ["embedding/0", () => api.embedding(sid, 0)],
-      ["qkv l0 q pos0", () => api.qkv(sid, 0, "q", 0)],
-      ["mlp l0 pos0", () => api.mlp(sid, 0, 0, 8)],
-      ["attention l0h0 pos0", () => api.attention(sid, 0, 0, 0)],
-      ["logits step0", () => api.logits(sid, 0, 8)],
+      [`embedding/${position}`, () => api.embedding(sid, position)],
+      [`qkv l0 q pos${position}`, () => api.qkv(sid, 0, "q", position)],
+      [`mlp l0 pos${position}`, () => api.mlp(sid, 0, position, 8)],
+      [`attention l0h0 pos${position}`, () => api.attention(sid, 0, 0, position)],
+      [`logits step${step}`, () => api.logits(sid, step, 8)],
     ]
     for (const [name, fn] of checks) {
       try {
-        const r = (await fn()) as { stats?: { n: number; l2_norm: number }; shape?: number[] }
-        out.push(`✓ ${name}: n=${r.stats?.n} l2=${r.stats?.l2_norm.toFixed(2)} ${r.shape ? "shape=" + JSON.stringify(r.shape) : ""}`)
+        const r = (await fn()) as { stats?: { n: number; l2_norm: number } | null; shape?: number[]; candidates?: { text: string; probability: number }[]; capture_kind?: string }
+        const detail = r.stats ? `n=${r.stats.n} l2=${r.stats.l2_norm.toFixed(2)}` : r.candidates ? `top candidates=${r.candidates.length}` : "captured"
+        out.push(`✓ ${name}: ${detail} ${r.shape ? "shape=" + JSON.stringify(r.shape) : r.capture_kind ? `capture=${r.capture_kind}` : ""}`)
       } catch (e) {
         out.push(`✗ ${name}: ${e}`)
       }

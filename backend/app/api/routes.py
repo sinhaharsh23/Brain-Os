@@ -942,6 +942,15 @@ async def session_logits(
     store = rec.store
     logits = store.logits.get(step)
     if logits is None:
+        captured_candidates = store.logit_candidates.get(step)
+        if captured_candidates:
+            return {
+                "step": step,
+                "candidates": captured_candidates[:k],
+                "stats": None,
+                "vocab_size": int(store.logit_vocab_sizes.get(step, 0)),
+                "capture_kind": "captured_top_candidates",
+            }
         raise HTTPException(404, f"logits not captured for step {step}")
     candidates = store.logit_candidates.get(step)
     if candidates is None:
@@ -997,8 +1006,8 @@ async def provider_model_info(provider_id: str, model: str):
     import asyncio
     from app.providers.ollama import model_info
     from app.providers.telemetry import telemetry
-    from app.providers.registry import LIMITED
+    from app.providers.registry import GGUF_DEEP
     if provider_id == "ollama":
         info = await asyncio.to_thread(model_info, model)
-        return telemetry("ollama", model, model=info, capabilities=LIMITED.to_dict(), sources={"model": "ollama_api"})
+        return telemetry("ollama", model, model=info, capabilities=GGUF_DEEP.to_dict(), sources={"model": info.get("source", "ollama_api")})
     raise HTTPException(404, "provider model metadata unavailable")

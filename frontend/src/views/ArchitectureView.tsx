@@ -63,7 +63,7 @@ export default function ArchitectureView() {
       }
       setProjectionData(projections)
       if (query.status === "rejected" && key.status === "rejected" && value.status === "rejected") {
-        setDetailError("No Q/K/V capture exists for this layer and token position. Run a Qwen inference and select a captured token.")
+        setDetailError("No Q/K/V capture exists for this layer and token position. Run an inference and select a captured token.")
       }
       setDetailLoading(false)
     })

@@ -2,14 +2,14 @@ import { useEffect, useState } from "react"
 import { useBrain } from "../store/useBrainStore"
 import { send } from "../ws/client"
 import { api } from "../api/client"
-import type { ProviderDescriptor } from "../types"
+import type { ModelMetadata, ProviderDescriptor, Telemetry } from "../types"
 
 const FALLBACK_PROVIDERS: ProviderDescriptor[] = [
   { provider_id: "qwen-local", display_name: "Qwen local", kind: "local", inspection_mode: "deep", availability: "available", limitation: "", capabilities: {}, models: ["Qwen/Qwen2.5-0.5B-Instruct"] },
   { provider_id: "openai", display_name: "OpenAI / ChatGPT", kind: "external", inspection_mode: "limited", availability: "unknown", limitation: "", capabilities: {}, models: ["gpt-4o-mini"] },
   { provider_id: "anthropic", display_name: "Anthropic / Claude", kind: "external", inspection_mode: "limited", availability: "unknown", limitation: "", capabilities: {}, models: ["claude-3-5-haiku-latest"] },
   { provider_id: "google", display_name: "Google Gemini", kind: "external", inspection_mode: "limited", availability: "unknown", limitation: "", capabilities: {}, models: ["gemini-2.0-flash"] },
-  { provider_id: "ollama", display_name: "Ollama", kind: "local", inspection_mode: "limited", availability: "unknown", limitation: "", capabilities: {}, models: ["llama3.2"] },
+  { provider_id: "ollama", display_name: "Ollama", kind: "local", inspection_mode: "deep", availability: "unknown", limitation: "", capabilities: {}, models: ["llama3.2"] },
 ]
 
 const optionLabels: Record<string, string> = {
@@ -17,7 +17,35 @@ const optionLabels: Record<string, string> = {
   openai: "OpenAI · LIMITED",
   anthropic: "Claude · LIMITED",
   google: "Gemini · LIMITED",
-  ollama: "Ollama · RUNTIME",
+  ollama: "Ollama · DEEP",
+}
+
+function ollamaArchitecture(telemetry: Telemetry, modelId: string): ModelMetadata {
+  const info = telemetry.model
+  const layers = Number(info.num_layers ?? 0)
+  const hiddenSize = Number(info.hidden_size ?? 0)
+  const heads = Number(info.num_attention_heads ?? 0)
+  return {
+    model_id: modelId,
+    architecture: String(info.architecture ?? "Ollama GGUF"),
+    num_params: Number(info.parameter_count ?? 0),
+    num_layers: layers,
+    hidden_size: hiddenSize,
+    num_attention_heads: heads,
+    num_kv_heads: Number(info.num_kv_heads ?? heads),
+    head_dim: heads > 0 ? Math.floor(hiddenSize / heads) : 0,
+    intermediate_size: Number(info.intermediate_size ?? 0),
+    vocab_size: Number(info.vocab_size ?? 0),
+    context_length: Number(info.context_window ?? 0),
+    max_position_embeddings: Number(info.max_position_embeddings ?? info.context_window ?? 0),
+    activation_function: String(info.activation_function ?? "Unavailable"),
+    dtype: String(info.runtime_dtype ?? info.quantization ?? "GGUF"),
+    quantization: String(info.quantization ?? "GGUF"),
+    device: String(info.device ?? "llama.cpp"),
+    tokenizer_name: modelId,
+    extra: { runtime: "llama.cpp", source: "Ollama installed GGUF" },
+    capabilities: telemetry.capabilities,
+  }
 }
 
 export default function PromptBar() {
@@ -89,7 +117,13 @@ export default function PromptBar() {
     if (provider !== "ollama" || !providerModel) return
     let cancelled = false
     api.providerModelInfo(provider, providerModel).then((telemetry) => {
-      if (!cancelled && useBrain.getState().provider === provider && useBrain.getState().providerModel === providerModel) useBrain.getState().set({ telemetry, modelStatus: telemetry.model.status === "READY" ? "loaded" : "error", inferenceError: telemetry.model.status === "READY" ? null : String(telemetry.model.status) })
+      if (!cancelled && useBrain.getState().provider === provider && useBrain.getState().providerModel === providerModel) useBrain.getState().set({
+        telemetry,
+        model: telemetry.model.status === "READY" ? ollamaArchitecture(telemetry, providerModel) : null,
+        inspectionMode: "deep",
+        modelStatus: telemetry.model.status === "READY" ? "loaded" : "error",
+        inferenceError: telemetry.model.status === "READY" ? null : String(telemetry.model.status),
+      })
     }).catch((error) => { if (!cancelled) useBrain.getState().set({ inferenceError: String(error), modelStatus: "error" }) })
     return () => { cancelled = true }
   }, [provider, providerModel])
@@ -144,7 +178,7 @@ export default function PromptBar() {
           </select>
         </>}
         {providerInfo && <span className={providerInfo.inspection_mode === "deep" ? "ok" : "warn"}>{providerInfo.inspection_mode === "deep" ? "Deep Inspection" : `External Observation · ${providerInfo.availability}`}</span>}
-        <span title={provider === "ollama" ? "Maximum output mapped to Ollama options.num_predict for this request. This is separate from the model context window." : "Maximum output mapped to Hugging Face max_new_tokens. This is separate from the model context window."}>Max Output Tokens</span>
+        <span title={provider === "ollama" ? "Maximum output mapped to llama.cpp generation for the selected Ollama GGUF. This is separate from the model context window." : "Maximum output mapped to Hugging Face max_new_tokens. This is separate from the model context window."}>Max Output Tokens</span>
         <input type="number" min={1} max={1200} value={maxNew} onChange={(e) => setMaxNew(Math.min(1200, Math.max(1, Number(e.target.value))))} disabled={running} aria-label="Max Output Tokens" />
         <span>temp</span>
         <input type="number" min={0} max={2} step={0.1} value={temperature} onChange={(e) => setTemperature(Number(e.target.value))} disabled={running} />

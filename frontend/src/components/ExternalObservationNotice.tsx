@@ -23,7 +23,7 @@ export default function ExternalObservationNotice() {
       <p className="muted">
         Model: <span className="mono">{providerModel || "provider default"}</span>. The provider API exposes response text and metadata only; BrainOS does not invent private tokens, embeddings, hidden states, attention, Q/K/V, logits, or MLP activations.
       </p>
-      {provider === "ollama" && <p className="muted">Internal transformer tensors are not exposed by the Ollama API. Switch to Native Model mode for full tensor inspection. Raw user input → Ollama request → prompt evaluation → streamed response → final runtime metrics.</p>}
+      {provider === "ollama" && <p className="muted">BrainOS uses the installed Ollama GGUF checkpoint with its instrumented llama.cpp runtime to capture real token IDs and transformer signals.</p>}
       <TelemetryDetails />
       {(usage || summary?.timings) && (
         <div className="kv">

@@ -24,6 +24,16 @@ from app.instrumentation.stats import pca_projection, pca_project_vector
 log = logging.getLogger("brainos.gguf_runtime")
 _build_lock = threading.Lock()
 _runner: Path | None = None
+_active_runs_lock = threading.Lock()
+_active_cancellations: dict[str, threading.Event] = {}
+
+
+def cancel_native_gguf() -> bool:
+    with _active_runs_lock:
+        if not _active_cancellations:
+            return False
+        next(reversed(_active_cancellations.values())).set()
+        return True
 
 
 def _model_path(model_id: str) -> Path:
@@ -96,6 +106,9 @@ def run_native_gguf(
 ) -> str:
     """Run the selected Ollama GGUF in llama.cpp while collecting real graph tensors."""
     session_id = uuid.uuid4().hex[:12]
+    cancel_event = threading.Event()
+    with _active_runs_lock:
+        _active_cancellations[session_id] = cancel_event
     started = time.perf_counter()
     max_new = max(1, min(int(params.get("max_new_tokens", settings.max_new_tokens_default)), settings.max_new_tokens_limit))
     temperature = max(0.0, min(2.0, float(params.get("temperature", 0.7))))
@@ -137,6 +150,8 @@ def run_native_gguf(
         record.status = "failed"
         record.errors.append(str(exc))
         emit("inference.failed", {"stage": "gguf_runtime", "message": str(exc)})
+        with _active_runs_lock:
+            _active_cancellations.pop(session_id, None)
         return session_id
     conversation_file = tempfile.NamedTemporaryFile(mode="w+", encoding="utf-8", suffix=".brainos-chat")
     for message in messages or [{"role": "user", "content": prompt}]:
@@ -159,10 +174,20 @@ def run_native_gguf(
         record.status = "failed"
         record.errors.append(str(exc))
         emit("inference.failed", {"stage": "gguf_runtime", "message": str(exc)})
+        with _active_runs_lock:
+            _active_cancellations.pop(session_id, None)
         return session_id
     assert process.stdout is not None
     try:
         for raw_line in process.stdout:
+            if cancel_event.is_set():
+                process.terminate()
+                process.wait(timeout=5)
+                record.status = "cancelled"
+                summary = record.summary()
+                summary.update({"status": "cancelled", "inspection_mode": "deep", "local_or_cloud": "local"})
+                emit("inference.cancelled", {"summary": summary, "response": record.response, "provider": "ollama", "model": model_id, "num_output_tokens": output_count})
+                return session_id
             fields = raw_line.rstrip("\n").split("\t")
             if not fields:
                 continue
@@ -210,7 +235,7 @@ def run_native_gguf(
                 prompt_tokens.append({"position": position, "id": token_id, "text": text, "is_special": text.startswith("<|")})
                 continue
             if kind == "PREFILL":
-                emit("model.metadata", {"metadata": metadata, "provider": "ollama", "model": model_id})
+                emit("model.metadata", {"metadata": metadata, "provider": "ollama", "model": model_id, "inspection_mode": "deep"})
                 record.tokens = prompt_tokens
                 record.store.prompt_length = len(prompt_tokens)
                 emit("tokenization.complete", {
@@ -411,8 +436,31 @@ def run_native_gguf(
                 record.status = "complete"
                 record.timings = {"total_ms": round(duration_ms, 2), "ttft_ms": round(ttft_ms or duration_ms, 2), "tokens_per_second": round(output_count / max(duration_ms / 1000, 0.001), 2)}
                 summary = record.summary()
-                summary.update({"status": "complete", "inspection_mode": "deep", "local_or_cloud": "local", "num_output_tokens": generated, "usage": {"input_tokens": input_tokens, "output_tokens": generated, "total_tokens": input_tokens + generated}})
-                emit("inference.complete", {"summary": summary, "response": record.response, "provider": "ollama", "model": model_id, "inspection_mode": "deep", "usage": summary["usage"], "num_output_tokens": generated, "timings": record.timings})
+                usage = {"input_tokens": input_tokens, "output_tokens": generated, "total_tokens": input_tokens + generated}
+                summary.update({"status": "complete", "inspection_mode": "deep", "local_or_cloud": "local", "num_output_tokens": generated, "usage": usage})
+                from app.providers.registry import GGUF_DEEP
+                from app.providers.telemetry import telemetry as build_telemetry
+
+                snapshot = build_telemetry(
+                    "ollama", model_id,
+                    model={
+                        "architecture": metadata.get("architecture"), "parameter_count": metadata.get("num_params"),
+                        "context_window": metadata.get("context_length"), "runtime_dtype": metadata.get("dtype"),
+                        "device": metadata.get("device"), "quantization": metadata.get("quantization"),
+                        "num_layers": metadata.get("num_layers"), "hidden_size": metadata.get("hidden_size"),
+                        "num_attention_heads": metadata.get("num_attention_heads"), "num_kv_heads": metadata.get("num_kv_heads"),
+                        "intermediate_size": metadata.get("intermediate_size"),
+                    },
+                    capabilities=GGUF_DEEP.to_dict(),
+                    tokens={"model_input_tokens": input_tokens, "generated_tokens": generated},
+                    timing={"total_ms": record.timings["total_ms"], "ttft_ms": record.timings["ttft_ms"]},
+                    sampling=params,
+                    tensors={"capture_available": bool(record.store.embeddings is not None or record.store.qkv)},
+                    sources={"model": "Ollama installed GGUF", "tokens": "llama.cpp tokenizer / generated token IDs", "tensors": "llama.cpp graph capture", "timing": "BrainOS timer"},
+                )
+                summary["telemetry"] = snapshot
+                emit("telemetry.updated", snapshot)
+                emit("inference.complete", {"summary": summary, "response": record.response, "provider": "ollama", "model": model_id, "inspection_mode": "deep", "usage": usage, "num_output_tokens": generated, "timings": record.timings, "telemetry": snapshot})
                 return session_id
     except Exception as exc:
         record.status = "failed"
@@ -420,6 +468,8 @@ def run_native_gguf(
         emit("inference.failed", {"stage": "gguf_runtime", "message": str(exc)})
         return session_id
     finally:
+        with _active_runs_lock:
+            _active_cancellations.pop(session_id, None)
         process.stdout.close()
         if process.poll() is None:
             process.terminate()

@@ -23,14 +23,16 @@ export default function TokenFlowView() {
       </div>
       <div className="token-strip">
         {tokens.map((t) => (
-          <span
+          <button
+            type="button"
             key={t.position}
             className={`token-chip ${t.is_special ? "special" : ""} ${selectedToken === t.position ? "selected" : ""}`}
             title={`pos ${t.position} · id ${t.id}`}
+            aria-pressed={selectedToken === t.position}
             onClick={() => selectToken(selectedToken === t.position ? null : t.position)}
           >
             {t.position}:{t.text}
-          </span>
+          </button>
         ))}
       </div>
 
@@ -42,14 +44,16 @@ export default function TokenFlowView() {
       <div className="panel-title">Generation stream {running ? `· step ${currentStep} ▮` : ""}</div>
       <div className="token-strip">
         {generatedTokens.map((t) => (
-          <span
+          <button
+            type="button"
             key={t.step}
             className={`token-chip generated ${selectedToken === t.position ? "selected" : ""}`}
             title={`step ${t.step} · id ${t.token_id} · p=${(t.probability * 100).toFixed(1)}% · rank ${t.rank} · ${t.time_ms}ms`}
+            aria-pressed={selectedToken === t.position}
             onClick={() => selectToken(selectedToken === t.position ? null : t.position)}
           >
             {t.position}:{t.text}
-          </span>
+          </button>
         ))}
       </div>
 

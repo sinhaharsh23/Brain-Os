@@ -1,8 +1,8 @@
-"""Ollama API metadata; no HF tokenizer or native tensor introspection."""
+"""Resolve Ollama model metadata for BrainOS' instrumented GGUF runtime."""
 import json
 import urllib.request
 import urllib.error
-from app.providers.registry import _ollama_url, LIMITED
+from app.providers.registry import _ollama_url, GGUF_DEEP
 
 
 def request_json(path, body=None):
@@ -13,7 +13,7 @@ def request_json(path, body=None):
 
 
 def model_info(model_id):
-    result = {'id': model_id, 'status': 'READY', 'source': 'ollama_api', 'capabilities': LIMITED.to_dict()}
+    result = {'id': model_id, 'status': 'READY', 'source': 'ollama_gguf', 'capabilities': GGUF_DEEP.to_dict()}
     try:
         show = request_json('/api/show', {'model': model_id})
         info = show.get('model_info', {})

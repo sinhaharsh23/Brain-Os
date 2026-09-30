@@ -26,11 +26,12 @@ def test_registry_has_local_and_cloud_descriptors_without_secrets():
     assert providers["qwen-local"].capabilities.hidden_states is True
     assert providers["openai"].capabilities.hidden_states is False
     assert providers["openai"].capabilities.api_usage is True
-    assert providers["ollama"].inspection_mode == "limited"
-    assert providers["ollama"].capabilities.hidden_states is False
-    assert providers["ollama"].capabilities.qkv is False
-    assert providers["ollama"].capabilities.attention is False
-    assert providers["ollama"].capabilities.embeddings is False
+    assert providers["ollama"].inspection_mode == "deep"
+    assert providers["ollama"].capabilities.hidden_states is True
+    assert providers["ollama"].capabilities.qkv is True
+    assert providers["ollama"].capabilities.attention is True
+    assert providers["ollama"].capabilities.embeddings is True
+    assert providers["ollama"].capabilities.token_ids is True
     assert providers["ollama"].capabilities.kv_cache is False
     assert "test-key" not in str(providers["openai"].to_dict()).lower()
 

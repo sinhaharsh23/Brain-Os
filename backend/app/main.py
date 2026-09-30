@@ -471,7 +471,28 @@ async def ws_endpoint(ws: WebSocket) -> None:
                             if native_session is not None and raw.get("type") == "inference.complete":
                                 state.replay.save_capture(native_session)
 
-                    loop.run_in_executor(None, lambda: external_engine.run_unified(provider, messages, params, callback, model_id=str(params.get("model") or "") or None))
+                    model_id = str(params.get("model") or "") or None
+                    if provider == "ollama":
+                        # The Ollama HTTP API returns response text and runtime
+                        # counters, but it does not expose the model's forward
+                        # tensors. Run the same installed GGUF through the
+                        # instrumented llama.cpp adapter so Ollama sessions can
+                        # use the existing token, embedding, attention, and
+                        # layer inspection views.
+                        from app.inference.gguf_runtime import run_native_gguf
+
+                        loop.run_in_executor(
+                            None,
+                            lambda: run_native_gguf(
+                                model_id or settings.ollama_models.split(",")[0].strip(),
+                                prompt,
+                                params,
+                                callback,
+                                messages=[{"role": item.role, "content": item.content} for item in messages],
+                            ),
+                        )
+                    else:
+                        loop.run_in_executor(None, lambda: external_engine.run_unified(provider, messages, params, callback, model_id=model_id))
                     await ws.send_json({"type": "ack", "data": {"action": "run", "provider": provider}})
                     continue
                 if state.engine is None or state.adapter is None or not state.adapter.is_loaded:
@@ -526,6 +547,12 @@ async def ws_endpoint(ws: WebSocket) -> None:
             elif action == "cancel":
                 if external_engine.cancel():
                     continue
+                try:
+                    from app.inference.gguf_runtime import cancel_native_gguf
+                    if cancel_native_gguf():
+                        continue
+                except ImportError:
+                    pass
                 if state.scheduler is not None:
                     run_id = msg.get("run_id")
                     cancelled = await state.scheduler.cancel_run(run_id, ws) if isinstance(run_id, str) else await state.scheduler.cancel_for_owner(ws)

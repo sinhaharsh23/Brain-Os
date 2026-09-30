@@ -64,6 +64,7 @@ export default function AttentionView() {
   const selectedHead = useBrain((s) => s.selectedHead)
   const selectLayer = useBrain((s) => s.selectLayer)
   const selectHead = useBrain((s) => s.selectHead)
+  const selectToken = useBrain((s) => s.selectToken)
   const selectedToken = useBrain((s) => s.selectedToken)
   const tokens = useBrain((s) => s.tokens)
   const generatedTokens = useBrain((s) => s.generatedTokens)
@@ -120,6 +121,15 @@ export default function AttentionView() {
     if (data && canvasRef.current) drawHeatmap(canvasRef.current, data, allTokens, selectedToken)
   }, [data, allTokens, selectedToken])
 
+  const selectHeatmapPosition = (event: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!data?.weights.length) return
+    const rect = event.currentTarget.getBoundingClientRect()
+    const y = (event.clientY - rect.top) * (640 / rect.height)
+    const rowHeight = (640 - 80) / data.weights.length
+    const row = Math.max(0, Math.min(data.weights.length - 1, Math.floor((y - 50) / rowHeight)))
+    if (y >= 50 && y <= 610) selectToken(data.weights[row].token_index)
+  }
+
   if (inspectionMode === "limited") return <ExternalObservationNotice />
 
   return (
@@ -162,7 +172,7 @@ export default function AttentionView() {
         )}
       </div>
       {error && <div className="err-box">{error}</div>}
-      <canvas ref={canvasRef} className="heatmap" />
+      <canvas ref={canvasRef} className="heatmap" onClick={selectHeatmapPosition} aria-label="Attention heatmap; click a row to select its source token" title="Click a row to select its source token" style={{ cursor: "pointer" }} />
       <section className="attention-explainer" aria-label="Attention calculation and results">
         <header>
           <strong>WHAT THIS ATTENTION ROW DOES</strong>

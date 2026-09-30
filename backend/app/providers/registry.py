@@ -80,8 +80,8 @@ OLLAMA_MODELS = _ollama_models()
 def _ollama_model_descriptors(configured: bool) -> tuple[ModelDescriptor, ...]:
     return tuple(ModelDescriptor(
         model_id=model_id, provider="ollama", display_name=model_id, mode="local",
-        architecture=None, capabilities=LIMITED,
-        available=configured, supports_streaming=True, supports_introspection=False,
+        architecture="Ollama GGUF via instrumented llama.cpp", capabilities=GGUF_DEEP,
+        available=configured, supports_streaming=True, supports_introspection=True,
         configuration_error=None if configured else "Ollama is not configured",
     ) for model_id in _ollama_models())
 _openai_configured = _configured("OPENAI_API_KEY")
@@ -115,11 +115,11 @@ PROVIDER_TEMPLATES = (
     ),
     ProviderDescriptor(
         provider_id="ollama", display_name="Ollama", kind="local", provider_type="local",
-        inspection_mode="limited", availability="configured" if _ollama_configured else "missing-url",
+        inspection_mode="deep", availability="configured" if _ollama_configured else "missing-url",
         configured=_ollama_configured, available=_ollama_configured,
         configuration_error=None if _ollama_configured else "OLLAMA_URL is not configured",
-        limitation="Internal transformer tensors are not exposed by the Ollama API. Switch to Native Model mode for full tensor inspection.",
-        capabilities=LIMITED, models=OLLAMA_MODELS,
+        limitation="Ollama model responses use the installed GGUF checkpoint through BrainOS' instrumented llama.cpp runtime for local tensor inspection.",
+        capabilities=GGUF_DEEP, models=OLLAMA_MODELS,
         model_descriptors=_ollama_model_descriptors(_ollama_configured),
     ),
     ProviderDescriptor(

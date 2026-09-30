@@ -228,8 +228,9 @@ export const useBrain = create<BrainState>((set, get) => ({
   switchProvider: (provider, modelId) => {
     const previous = get()
     if (previous.sessionId) retiredSessions.add(previous.sessionId)
+    const deepInspection = provider === "qwen-local" || provider === "ollama"
     set({ ...traceReset(), provider, providerModel: modelId || null, model: provider === "qwen-local" ? previous.nativeModel : null,
-      inspectionMode: provider === "qwen-local" ? "deep" : "limited", devLog: [],
+      inspectionMode: deepInspection ? "deep" : "limited", devLog: [],
       modelStatus: provider === "qwen-local" && previous.nativeModel ? "loaded" : "not_loaded" })
   },
   connected: false,
@@ -416,9 +417,14 @@ export const useBrain = create<BrainState>((set, get) => ({
         })
         break
       case "model.metadata":
-        // Provider-reported metadata does not imply direct access to the
-        // provider's internal transformer graph. Keep Ollama in limited mode.
-        set({ model: data.metadata as ModelMetadata, provider: String(data.provider ?? st.provider ?? "ollama"), providerModel: String(data.model ?? st.providerModel ?? ""), inspectionMode: "limited" })
+        set({
+          model: data.metadata as ModelMetadata,
+          provider: String(data.provider ?? st.provider ?? "ollama"),
+          providerModel: String(data.model ?? st.providerModel ?? ""),
+          inspectionMode: data.inspection_mode === "deep" ? "deep" : "limited",
+          modelStatus: "loaded",
+          devLog: pushLog(st.devLog, `model metadata: ${String((data.metadata as ModelMetadata | undefined)?.architecture ?? "provider model")}`),
+        })
         break
       case "inference.paused":
         set({ paused: true, devLog: pushLog(st.devLog, `inference paused after step ${String(data.step)}`), timeline: pushTimeline(st.timeline, { type: "pause", label: `paused after step ${String(data.step)}`, step: data.step as number, ts }) })
@@ -472,6 +478,7 @@ export const useBrain = create<BrainState>((set, get) => ({
           inferenceError: null,
           provider: String(data.provider ?? "qwen-local"),
           inspectionMode: data.inspection_mode === "deep" || !data.inspection_mode ? "deep" : "limited",
+          providerModel: String(data.model_id ?? st.providerModel ?? ""),
           usage: null,
           sessionId: (ev.session_id as string) ?? null,
           runId: typeof data.run_id === "string" ? data.run_id : st.runId,

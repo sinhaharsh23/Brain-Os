@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <map>
@@ -202,22 +203,64 @@ bool capture_callback(ggml_tensor *tensor, bool ask, void *user_data) {
     return true;
 }
 
-int32_t apply_template(const llama_model *model, const std::string &prompt, std::vector<char> &formatted) {
+std::string decode_hex(const std::string &value) {
+    std::string decoded;
+    decoded.reserve(value.size() / 2);
+    auto nibble = [](char c) -> int {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        return -1;
+    };
+    for (size_t i = 0; i + 1 < value.size(); i += 2) {
+        const int high = nibble(value[i]), low = nibble(value[i + 1]);
+        if (high < 0 || low < 0) return {};
+        decoded.push_back(static_cast<char>((high << 4) | low));
+    }
+    return decoded;
+}
+
+std::vector<std::pair<std::string, std::string>> read_messages(const char *path, const std::string &prompt) {
+    std::vector<std::pair<std::string, std::string>> messages;
+    if (path) {
+        std::ifstream input(path);
+        std::string line;
+        while (std::getline(input, line)) {
+            const size_t separator = line.find('\t');
+            if (separator == std::string::npos) continue;
+            const std::string role = line.substr(0, separator);
+            const std::string content = decode_hex(line.substr(separator + 1));
+            if (!role.empty()) messages.emplace_back(role, content);
+        }
+    }
+    if (messages.empty()) messages.emplace_back("user", prompt);
+    return messages;
+}
+
+int32_t apply_template(const llama_model *model, const std::vector<std::pair<std::string, std::string>> &source_messages, std::vector<char> &formatted) {
     const char *tmpl = llama_model_chat_template(model, nullptr);
     if (!tmpl) {
+        const std::string &prompt = source_messages.back().second;
         formatted.assign(prompt.begin(), prompt.end());
         return static_cast<int32_t>(formatted.size());
     }
-    const llama_chat_message message{"user", prompt.c_str()};
-    int32_t capacity = static_cast<int32_t>(prompt.size() * 4 + 1024);
+    std::vector<llama_chat_message> messages;
+    messages.reserve(source_messages.size());
+    size_t content_length = 0;
+    for (const auto &message : source_messages) {
+        messages.push_back({message.first.c_str(), message.second.c_str()});
+        content_length += message.second.size();
+    }
+    int32_t capacity = static_cast<int32_t>(content_length * 4 + 1024 * messages.size());
     formatted.resize(static_cast<size_t>(capacity));
-    int32_t size = llama_chat_apply_template(tmpl, &message, 1, true, formatted.data(), capacity);
+    int32_t size = llama_chat_apply_template(tmpl, messages.data(), static_cast<int32_t>(messages.size()), true, formatted.data(), capacity);
     if (size < 0 || size > capacity) {
         capacity = size + 1;
         formatted.resize(static_cast<size_t>(capacity));
-        size = llama_chat_apply_template(tmpl, &message, 1, true, formatted.data(), capacity);
+        size = llama_chat_apply_template(tmpl, messages.data(), static_cast<int32_t>(messages.size()), true, formatted.data(), capacity);
     }
     if (size < 0) {
+        const std::string &prompt = source_messages.back().second;
         formatted.assign(prompt.begin(), prompt.end());
         return static_cast<int32_t>(formatted.size());
     }
@@ -249,8 +292,11 @@ int main(int argc, char **argv) {
     llama_model *model = llama_model_load_from_file(argv[1], model_params);
     if (!model) { llama_backend_free(); std::fprintf(stderr, "failed to load GGUF model\n"); return 3; }
 
+    const auto messages = read_messages(argc > 8 ? argv[8] : nullptr, argv[3]);
     std::vector<char> formatted;
-    const int32_t formatted_size = apply_template(model, argv[3], formatted);
+    const int32_t formatted_size = apply_template(model, messages, formatted);
+    const bool has_system = std::any_of(messages.begin(), messages.end(), [](const auto &message) { return message.first == "system"; });
+    std::cout << "TEMPLATE\t" << hex_piece(std::string(formatted.begin(), formatted.end())) << '\t' << messages.size() << '\t' << (has_system ? 1 : 0) << '\n';
     const llama_vocab *vocab = llama_model_get_vocab(model);
     std::vector<llama_token> tokens(static_cast<size_t>(std::max(64, formatted_size * 2 + 32)));
     int32_t token_count = llama_tokenize(vocab, formatted.data(), formatted_size, tokens.data(), static_cast<int32_t>(tokens.size()), false, true);
