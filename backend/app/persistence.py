@@ -53,11 +53,16 @@ def migrate_database(url: str) -> None:
     config.set_main_option("sqlalchemy.url", url.replace("%", "%%"))
     engine = create_engine(url, connect_args={"check_same_thread": False} if url.startswith("sqlite") else {}, future=True)
     try:
-        tables = set(inspect(engine).get_table_names())
-        if tables and "alembic_version" not in tables and EXPECTED_TABLES.issubset(tables):
-            command.stamp(config, "head")
-        else:
-            command.upgrade(config, "head")
+        with engine.connect() as connection:
+            tables = set(inspect(connection).get_table_names())
+            # End SQLAlchemy's implicit transaction from schema inspection before
+            # handing the same connection to Alembic for its migration transaction.
+            connection.rollback()
+            config.attributes["connection"] = connection
+            if tables and "alembic_version" not in tables and EXPECTED_TABLES.issubset(tables):
+                command.stamp(config, "head")
+            else:
+                command.upgrade(config, "head")
     finally:
         engine.dispose()
 

@@ -308,13 +308,15 @@ jobs:
             --env BRAINOS_PORT=8765 \
             --env BRAINOS_DEVICE=cpu \
             --env HF_HOME=/data/huggingface \
+            --env BRAINOS_LOCAL_MODEL_OFFLINE=false \
+            --env BRAINOS_LOCAL_MODEL_ALLOW_DOWNLOAD=true \
             --env BRAINOS_REPLAY_DIR=/data/replay_sessions \
             --env BRAINOS_DATABASE_URL=sqlite:////data/brainos/brainos.db \
             brainos:ci
       - name: Wait for container readiness
         run: |
           set -euo pipefail
-          for attempt in {1..180}; do
+          for attempt in {1..300}; do
             if curl --fail --silent http://127.0.0.1:8765/api/ready > /tmp/brainos-ready.json; then
               grep -q '"status":"ready"' /tmp/brainos-ready.json
               exit 0
@@ -354,10 +356,12 @@ jobs:
             --env BRAINOS_PORT=8765 \
             --env BRAINOS_DEVICE=cpu \
             --env HF_HOME=/data/huggingface \
+            --env BRAINOS_LOCAL_MODEL_OFFLINE=false \
+            --env BRAINOS_LOCAL_MODEL_ALLOW_DOWNLOAD=true \
             --env BRAINOS_REPLAY_DIR=/data/replay_sessions \
             --env BRAINOS_DATABASE_URL=sqlite:////data/brainos/brainos.db \
             brainos:ci
-          for attempt in {1..180}; do
+          for attempt in {1..300}; do
             if curl --fail --silent http://127.0.0.1:8765/api/ready > /dev/null; then
               docker exec brainos-runtime-ci test -f /data/brainos/ci-marker
               exit 0
@@ -441,6 +445,8 @@ jobs:
             --env BRAINOS_PORT=8765 \
             --env BRAINOS_DEVICE=cpu \
             --env HF_HOME=/data/huggingface \
+            --env BRAINOS_LOCAL_MODEL_OFFLINE=false \
+            --env BRAINOS_LOCAL_MODEL_ALLOW_DOWNLOAD=true \
             --env BRAINOS_REPLAY_DIR=/data/replay_sessions \
             --env BRAINOS_DATABASE_URL=sqlite:////data/brainos/brainos.db \
             brainos:proxy-ci
@@ -452,7 +458,7 @@ jobs:
       - name: Wait for proxied readiness
         run: |
           set -euo pipefail
-          for attempt in {1..180}; do
+          for attempt in {1..300}; do
             if curl --fail --silent --insecure https://127.0.0.1:8443/api/ready > /tmp/brainos-proxy-ready.json; then
               grep -q '"status":"ready"' /tmp/brainos-proxy-ready.json
               exit 0
@@ -541,13 +547,15 @@ jobs:
             --env BRAINOS_PORT=8765 \
             --env BRAINOS_DEVICE=cpu \
             --env HF_HOME=/data/huggingface \
+            --env BRAINOS_LOCAL_MODEL_OFFLINE=false \
+            --env BRAINOS_LOCAL_MODEL_ALLOW_DOWNLOAD=true \
             --env BRAINOS_REPLAY_DIR=/data/replay_sessions \
             --env BRAINOS_DATABASE_URL=sqlite:////data/brainos/brainos.db \
             brainos:load-ci
       - name: Wait for service readiness
         run: |
           set -euo pipefail
-          for attempt in {1..180}; do
+          for attempt in {1..300}; do
             if curl --fail --silent http://127.0.0.1:8765/api/ready | grep -q '"status":"ready"'; then
               exit 0
             fi
@@ -625,12 +633,14 @@ jobs:
           HF_HOME: ${{ runner.temp }}/huggingface
           BRAINOS_HF_HOME: ${{ runner.temp }}/huggingface
           BRAINOS_DEVICE: cpu
+          BRAINOS_LOCAL_MODEL_OFFLINE: "false"
+          BRAINOS_LOCAL_MODEL_ALLOW_DOWNLOAD: "true"
           BRAINOS_DATABASE_URL: sqlite:////tmp/brainos-ci.db
           BRAINOS_REPLAY_DIR: /tmp/brainos-ci-replays
         run: nohup python backend/run.py > /tmp/brainos.log 2>&1 &
       - name: Wait for model readiness
         run: |
-          for attempt in {1..120}; do
+          for attempt in {1..300}; do
             curl --fail --silent http://127.0.0.1:8765/api/ready && exit 0
             sleep 2
           done
