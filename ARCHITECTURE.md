@@ -1,39 +1,57 @@
-# BrainOS 3.0 Architecture
+# BrainOS Architecture
 
-BrainOS is a local-first Transformer observatory. The current supported runtime is a single FastAPI process with one loaded Hugging Face model, a React/WebGL client, and file-backed replay artifacts.
+BrainOS is a local-first Transformer observability app. A React and Three.js frontend talks to a FastAPI backend over REST and WebSocket. The backend can run a Hugging Face PyTorch checkpoint, an Ollama-installed GGUF model through an instrumented llama.cpp runner, or a supported hosted provider.
 
 ```text
-Browser
-  │ REST + WebSocket
-  ▼
-FastAPI API / WebSocket endpoint
-  ├── connection-scoped event routing
-  ├── Qwen inference engine (serialized heavy execution)
-  ├── instrumentation hooks and tensor inspection
-  ├── external observation adapters (limited metadata)
-  ├── system monitor
-  └── replay store (JSON events + tensor capture bundles)
-       │
-       ├── Hugging Face model cache (project-relative by default)
-       └── Apple MPS / CPU fallback
+Browser UI (React, TypeScript, Three.js)
+  ├── REST: provider catalog, model/hardware metadata, tensor inspection, replay
+  └── WebSocket: prompt runs, generated text, captures, timing, cancellation
+          │
+          ▼
+FastAPI backend
+  ├── Hugging Face adapter → tokenizer + PyTorch model + forward hooks
+  ├── Ollama adapter → installed GGUF + instrumented llama.cpp runner
+  ├── Hosted provider adapters → response stream + exposed usage/metadata
+  ├── connection-scoped event routing and system monitor
+  └── replay store → JSON events + captured tensor bundles
 ```
 
-## Runtime boundaries
+## Inference providers
 
-- `backend/app/models` owns model adapters, tokenization, forward passes, sampling, and metadata.
-- `backend/app/inference` owns per-run tokens, events, captures, timings, cancellation, and replay summaries. The model object is shared; heavy local execution is serialized by the engine lock.
-- `backend/app/events` owns the typed event bus. `backend/app/ws/manager.py` routes session-scoped events to the owning WebSocket and broadcasts only global telemetry.
-- `backend/app/api` exposes readiness, hardware, model/provider metadata, replay, and on-demand tensor endpoints.
-- `frontend/src/store` consumes real REST/WebSocket data. The Three.js observatory renders selective summaries: actual token positions, captured layer state, selected attention links, PCA embeddings, and top-K MLP units.
+### Hugging Face Local
 
-## Persistence
+BrainOS loads a supported causal model through its architecture adapter. The PyTorch execution path captures model-produced token IDs, embeddings, hidden states, attention, Q/K/V, MLP activations, residuals, logits, probabilities, and KV-cache data where enabled. Device selection supports Apple MPS, CUDA/ROCm compatibility, and CPU fallback.
 
-Replay metadata and events remain JSON files and captured tensors remain `.pt` bundles under `BRAINOS_REPLAY_DIR`. When `BRAINOS_AUTH_MODE=multi_user`, SQLAlchemy metadata persistence adds User, Workspace, Project, session, inference-run, replay-reference, model, and provider records using SQLite by default and PostgreSQL-compatible URLs. Large tensor payloads stay in the replay/object files; relational rows store references and ownership metadata. Legacy replay files remain readable and can be claimed into the authenticated ownership index.
+### Ollama GGUF
 
-## Accelerator policy
+Ollama supplies the installed model identity and GGUF file. BrainOS runs that GGUF through its small native llama.cpp evaluation-capture runner instead of relying on the standard Ollama chat API for internal tensors. It streams token IDs and generated text and captures available embeddings, attention, Q/K/V, layer outputs, MLP activations, logits, probabilities, and runtime telemetry. GGUF capture does not currently provide the PyTorch logit lens or tensor KV-cache views.
 
-Device selection is `auto` by default and supports MPS, CUDA/ROCm, and CPU fallback. The physical verification target on the current development machine is Apple Silicon MPS with `Qwen/Qwen2.5-0.5B-Instruct`. CUDA and ROCm are compatibility paths and are not claimed as physically verified here.
+The runner is built on first use from `backend/native/gguf_runner.cpp`. The current build path expects the Ollama CLI, Homebrew `llama.cpp` and `ggml` libraries, and a C++17 compiler. `OLLAMA_GGUF_PATH` can point directly to a model file; otherwise BrainOS resolves the installed model through `ollama show`.
 
-## Observability honesty
+### Hosted providers
 
-Deep inspection is only advertised for local checkpoints whose tensors are captured by BrainOS. External providers are explicitly limited to provider-exposed response text, timing, usage, model, and errors. The browser never claims to render every neuron or every edge: the 3D view is a filtered, performant representation with on-demand full data for selected components.
+OpenAI, Anthropic, and Gemini adapters expose only data returned by their APIs, such as response text, stream events, timing, usage, model identity, and errors. They do not expose private transformer internals. The UI labels these runs as limited external observation and leaves unavailable tensor panels empty.
+
+## Backend and event flow
+
+- `backend/app/providers` describes provider capabilities and creates provider-neutral telemetry snapshots.
+- `backend/app/models` owns Hugging Face model adapters and model metadata.
+- `backend/app/inference` coordinates local runs, sampling, capture, cancellation, and session records. Native GGUF execution lives in `gguf_runtime.py`.
+- `backend/app/events` defines typed events. The WebSocket manager sends session events only to their owning connection; global hardware and monitor events use the appropriate broadcast path.
+- `backend/app/api` exposes health/readiness, provider and model catalogs, hardware/monitoring, replay, and on-demand tensor inspection.
+
+For local inference, the event stream reports the prompt and model, input tokenization, available tensor captures, selected/generated tokens, telemetry, and completion or cancellation. Captures are actual runtime outputs; the frontend does not synthesize missing tensors or metrics.
+
+## Frontend
+
+`frontend/src/store/useBrainStore.ts` reduces the typed WebSocket events into session, token, layer, attention, tensor, telemetry, and replay state. React views render provider-aware model details and observability panels. The 3D stage uses selected tokens, layer progress, captured attention links, PCA embeddings, and top-K MLP units rather than drawing every tensor element.
+
+## Persistence and security
+
+Replay events are stored as JSON and captured tensors as `.pt` bundles under `BRAINOS_REPLAY_DIR`. Multi-user mode can persist users, workspaces, projects, sessions, runs, and model/provider metadata through SQLAlchemy with SQLite or a PostgreSQL-compatible database. Tensor payloads remain file-backed; database records store ownership and references.
+
+Authentication mode, bearer/token protection, CORS, and rate limits are configured by backend environment settings. Provider keys are read by the backend and must stay out of the frontend bundle and Git.
+
+## Deployment
+
+The repository's supported deployment artifact is the root Dockerfile and Docker Compose setup, with a WebSocket-capable reverse proxy for networked use. The `brain-os` Vercel project is currently disconnected from this GitHub repository, so pushes do not create Vercel deployments. See [DEPLOYMENT.md](DEPLOYMENT.md) for the supported container and reverse-proxy setup.

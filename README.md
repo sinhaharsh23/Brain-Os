@@ -1,6 +1,6 @@
 # BrainOS
 
-BrainOS is a local Transformer observatory. It runs `Qwen/Qwen2.5-0.5B-Instruct` with PyTorch and exposes observable computation through a real-time React/WebGL interface.
+BrainOS is a local-first Transformer observatory. It runs supported Hugging Face causal models, including the default `Qwen/Qwen2.5-0.5B-Instruct`, and can deeply inspect installed Ollama GGUF models through an instrumented llama.cpp runner. A real-time React/Three.js interface displays the computation each runtime exposes.
 
 ## Features
 
@@ -8,6 +8,7 @@ BrainOS is a local Transformer observatory. It runs `Qwen/Qwen2.5-0.5B-Instruct`
 - Real embeddings with PCA coordinates and vector statistics
 - Real hidden states, attention weights, Q/K/V projections, MLP activations, logits, and probabilities
 - Architecture adapters for Qwen2, Llama-compatible, Mistral, and Gemma Hugging Face checkpoints
+- Deep GGUF inspection for installed Ollama models through BrainOS' instrumented llama.cpp runner
 - Token-by-token generation over WebSocket
 - Interactive 3D transformer stack with token nodes, attention links, and activation intensity
 - Real top-K MLP activation units rendered as selectable 3D neuron nodes
@@ -43,9 +44,11 @@ For frontend development, run the backend on port `8765`, then run `npm run dev`
 
 ## Providers
 
-**Hugging Face Local** loads the native Qwen checkpoint and tokenizer. BrainOS can report the applied chat template, input token IDs, real embeddings, PyTorch forward-hook captures, logits, probabilities, and KV-cache tensors when the corresponding capture path ran.
+**Hugging Face Local** loads a supported local checkpoint and tokenizer. BrainOS reports the applied chat template and captures model-produced token IDs, embeddings, hidden states, attention, Q/K/V, MLP and residual activations, logits, probabilities, and KV-cache tensors when those captures are enabled.
 
-**Ollama** uses the selected installed Ollama GGUF checkpoint through BrainOS' instrumented llama.cpp runtime. This keeps the same local model while capturing its real chat-template token IDs, embeddings, attention, Q/K/V projections, layer outputs, MLP activations, logits, probabilities, and generated-token flow. The GGUF runtime requires the Ollama CLI, Homebrew `llama.cpp` and `ggml`, and a C++17 compiler; BrainOS builds its small capture runner on first use. The standard Ollama HTTP API remains available for model metadata, but it does not expose the internal tensors needed for these views.
+**Ollama** uses the selected installed GGUF checkpoint through BrainOS' instrumented llama.cpp runner. It can capture the GGUF model's real token IDs, embeddings, attention, Q/K/V, layer outputs, MLP activations, logits, probabilities, and generated-token flow. The runner is built on first use and requires the Ollama CLI, Homebrew `llama.cpp` and `ggml`, and a C++17 compiler. Set `OLLAMA_GGUF_PATH` to use a specific GGUF file directly. The GGUF path currently does not expose PyTorch logit-lens or tensor KV-cache views.
+
+**OpenAI, Anthropic, and Gemini** use their provider APIs. BrainOS shows only returned response text, stream events, timing, usage, model identity, and errors. Their internal transformer tensors are not available through these adapters.
 
 Set `OLLAMA_URL` and `OLLAMA_MODELS` (comma-separated model names installed in Ollama); the default URL is `http://127.0.0.1:11434`. Ollama is the runtime provider, while the selected tag (for example, `llama3.2:3b`) is the model identity. Its sampling options are the options BrainOS sends with the request.
 
@@ -58,6 +61,12 @@ BRAINOS_LIVE_EXTERNAL_TESTS=1 OPENAI_API_KEY=... backend/.venv/bin/python -m pyt
 ```
 
 The default test suite never sends requests to external providers.
+
+## Architecture and deployment
+
+The React/Three.js frontend uses REST for catalogs, health, replay, and on-demand inspection, and WebSocket for generation events, telemetry, and cancellation. The backend routes session events to their owning WebSocket and stores replay events and tensor captures for later inspection. See [ARCHITECTURE.md](ARCHITECTURE.md) and [docs/BRAINOS_ARCHITECTURE.md](docs/BRAINOS_ARCHITECTURE.md) for the runtime boundaries and data flow.
+
+The repository does not contain Vercel deployment configuration, and the Vercel `brain-os` project is disconnected from this GitHub repository. The supported deployment path is Docker Compose, with a WebSocket-capable reverse proxy for networked installations; see [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ## Tests
 
